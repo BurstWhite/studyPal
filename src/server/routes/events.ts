@@ -12,7 +12,9 @@ import {
   type WriteResult,
 } from "../calendar/store";
 import {
+  clearNow,
   pushNow,
+  runHelper,
   scheduleSystemCalendarPush,
   setSystemCalendarEnabled,
   systemCalendarStatus,
@@ -130,7 +132,20 @@ export const eventRoutes = {
       if (typeof body?.enabled !== "boolean")
         return badRequest("需要 enabled 字段");
       setSystemCalendarEnabled(getDb(), body.enabled);
-      if (body.enabled) await pushNow(getDb());
+      if (body.enabled) await pushNow(getDb(), runHelper, { verify: true });
+      return Response.json(systemCalendarStatus(getDb()));
+    }),
+  },
+
+  /**
+   * Deletes the studyPal calendar from the system and switches mirroring off.
+   * Nothing in studyPal itself is removed.
+   */
+  "/api/system-calendar/clear": {
+    POST: guarded(async () => {
+      const result = await clearNow(getDb());
+      if (!result.ok)
+        return Response.json({ error: result.message }, { status: 500 });
       return Response.json(systemCalendarStatus(getDb()));
     }),
   },
@@ -138,7 +153,7 @@ export const eventRoutes = {
   /** Pushes on demand and reports the outcome. */
   "/api/system-calendar/push": {
     POST: guarded(async () => {
-      await pushNow(getDb());
+      await pushNow(getDb(), runHelper, { verify: true });
       return Response.json(systemCalendarStatus(getDb()));
     }),
   },

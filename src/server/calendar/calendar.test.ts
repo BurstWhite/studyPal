@@ -13,7 +13,9 @@ import {
 } from "./store";
 import {
   buildItems,
+  clearSystemCalendar,
   pushToSystemCalendar,
+  systemCalendarStatus,
   type HelperRequest,
   type HelperResponse,
 } from "./system";
@@ -426,5 +428,210 @@ describe("system calendar", () => {
     expect(first).toEqual({ ok: false, message: "有 1 项没有写入系统日历" });
     const second = await pushToSystemCalendar(db, helper.run);
     expect(second).toEqual({ ok: true, total: 4, written: 1, removed: 0 });
+  });
+});
+
+describe("system calendar repair and clearing", () => {
+  /** A stand-in for the EventKit helper: one calendar holding events by id. */
+  function fakeSystem() {
+    const state = {
+      calendarId: "CAL-1" as string | null,
+      events: new Map<string, string>(),
+      calls: [] as HelperRequest[],
+      nextEvent: 1,
+      nextCalendar: 2,
+    };
+    const run = async (request: HelperRequest): Promise<HelperResponse> => {
+      state.calls.push(request);
+      const response: HelperResponse = {
+        ok: true,
+        calendarRecreated: false,
+        eventIds: {},
+        missing: [],
+        removed: false,
+      };
+      if (request.action === "clear") {
+        if (
+          request.calendarId !== null &&
+          request.calendarId === state.calendarId
+        ) {
+          state.calendarId = null;
+          state.events.clear();
+          response.removed = true;
+        }
+        return response;
+      }
+      if (
+        state.calendarId === null ||
+        (request.calendarId !== null && request.calendarId !== state.calendarId)
+      ) {
+        // The calendar the caller knew is gone: make a new, empty one.
+        const hadOne = request.calendarId !== null;
+        state.calendarId = `CAL-${state.nextCalendar++}`;
+        state.events.clear();
+        response.calendarId = state.calendarId;
+        response.calendarRecreated = hadOne;
+        if (hadOne) return response;
+      }
+      response.calendarId = state.calendarId;
+      response.missing = (request.verify ?? []).filter(
+        (id) => !state.events.has(id),
+      );
+      for (const id of request.deletes) state.events.delete(id);
+      for (const item of request.upserts) {
+        const id =
+          item.eventId && state.events.has(item.eventId)
+            ? item.eventId
+            : `EV-${state.nextEvent++}`;
+        state.events.set(id, item.title);
+        response.eventIds[item.key] = id;
+      }
+      return response;
+    };
+    return { run, state };
+  }
+
+  function seed() {
+    const db = openDatabase(":memory:");
+    for (const title of ["组会", "跑步", "答疑"]) {
+      createEvent(
+        db,
+        parseEventInput({
+          title,
+          startsAt: "2026-11-10T14:00:00+08:00",
+          endsAt: "2026-11-10T15:00:00+08:00",
+        }),
+      );
+    }
+    return db;
+  }
+
+  test("an ordinary push does not notice events deleted in the Calendar app", async () => {
+    const db = seed();
+    const system = fakeSystem();
+    await pushToSystemCalendar(db, system.run);
+    system.state.events.delete("EV-2");
+
+    // Nothing changed in studyPal, so nothing is sent.
+    expect(await pushToSystemCalendar(db, system.run)).toMatchObject({
+      written: 0,
+    });
+    expect(system.state.events.size).toBe(2);
+  });
+
+  test("a verifying push writes back events deleted in the Calendar app", async () => {
+    const db = seed();
+    const system = fakeSystem();
+    await pushToSystemCalendar(db, system.run);
+    system.state.events.delete("EV-1");
+    system.state.events.delete("EV-3");
+
+    const result = await pushToSystemCalendar(db, system.run, { verify: true });
+    expect(result).toEqual({ ok: true, total: 3, written: 2, removed: 0 });
+    expect([...system.state.events.values()].sort()).toEqual(
+      ["答疑", "组会", "跑步"].sort(),
+    );
+
+    // With everything in place, verifying finds nothing to do.
+    expect(
+      await pushToSystemCalendar(db, system.run, { verify: true }),
+    ).toMatchObject({ written: 0 });
+  });
+
+  test("a verifying push rebuilds a calendar that was deleted", async () => {
+    const db = seed();
+    const system = fakeSystem();
+    await pushToSystemCalendar(db, system.run);
+    system.state.calendarId = null;
+    system.state.events.clear();
+
+    const result = await pushToSystemCalendar(db, system.run, { verify: true });
+    expect(result).toEqual({ ok: true, total: 3, written: 3, removed: 0 });
+    expect(system.state.events.size).toBe(3);
+    expect(systemCalendarStatus(db).hasCalendar).toBe(true);
+  });
+
+  test("a denied permission while verifying is reported", async () => {
+    const db = seed();
+    await pushToSystemCalendar(db, fakeSystem().run);
+    const denied = async (): Promise<HelperResponse> => ({
+      ok: false,
+      code: "denied",
+      calendarRecreated: false,
+      eventIds: {},
+    });
+    const result = await pushToSystemCalendar(db, denied, { verify: true });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("隐私与安全性");
+  });
+
+  test("clearing deletes the calendar, forgets what was written, and switches mirroring off", async () => {
+    const db = seed();
+    const system = fakeSystem();
+    db.query(
+      "INSERT INTO settings (key, value) VALUES ('system_calendar_enabled', 'true')",
+    ).run();
+    await pushToSystemCalendar(db, system.run);
+    expect(systemCalendarStatus(db)).toMatchObject({
+      enabled: true,
+      hasCalendar: true,
+    });
+
+    expect(await clearSystemCalendar(db, system.run)).toMatchObject({
+      ok: true,
+    });
+    expect(system.state.calendarId).toBeNull();
+    expect(system.state.events.size).toBe(0);
+    expect(system.state.calls.at(-1)).toMatchObject({
+      action: "clear",
+      calendarId: "CAL-1",
+    });
+    expect(db.query("SELECT count(*) AS n FROM calendar_links").get()).toEqual({
+      n: 0,
+    });
+    expect(systemCalendarStatus(db)).toEqual({
+      enabled: false,
+      hasCalendar: false,
+      last: null,
+    });
+    // studyPal's own events are untouched.
+    expect(db.query("SELECT count(*) AS n FROM events").get()).toEqual({
+      n: 3,
+    });
+
+    // Switching it back on writes everything into a fresh calendar.
+    expect(await pushToSystemCalendar(db, system.run)).toMatchObject({
+      written: 3,
+    });
+    expect(system.state.calendarId).toBe("CAL-2");
+  });
+
+  test("clearing with no calendar on record does not call the helper", async () => {
+    const db = seed();
+    const system = fakeSystem();
+    expect(await clearSystemCalendar(db, system.run)).toMatchObject({
+      ok: true,
+    });
+    expect(system.state.calls).toHaveLength(0);
+  });
+
+  test("a failed clear keeps the record so it can be tried again", async () => {
+    const db = seed();
+    await pushToSystemCalendar(db, fakeSystem().run);
+    const failing = async (): Promise<HelperResponse> => ({
+      ok: false,
+      code: "failed",
+      error: "磁盘错误",
+      calendarRecreated: false,
+      eventIds: {},
+    });
+    expect(await clearSystemCalendar(db, failing)).toEqual({
+      ok: false,
+      message: "磁盘错误",
+    });
+    expect(db.query("SELECT count(*) AS n FROM calendar_links").get()).toEqual({
+      n: 3,
+    });
+    expect(systemCalendarStatus(db).hasCalendar).toBe(true);
   });
 });

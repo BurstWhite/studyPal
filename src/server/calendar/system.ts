@@ -47,6 +47,10 @@ export interface HelperRequest {
   calendarTitle: string;
   upserts: (CalendarItem & { eventId: string | null })[];
   deletes: string[];
+  /** Event ids to check; the ones no longer in the calendar come back as `missing`. */
+  verify?: string[];
+  /** `clear` deletes the whole studyPal calendar instead of writing to it. */
+  action?: "sync" | "clear";
 }
 
 export interface HelperResponse {
@@ -56,6 +60,10 @@ export interface HelperResponse {
   calendarId?: string;
   calendarRecreated: boolean;
   eventIds: Record<string, string>;
+  /** Of the ids sent in `verify`, those that no longer exist. */
+  missing?: string[];
+  /** True when `clear` found and deleted the calendar. */
+  removed?: boolean;
 }
 
 export type HelperRunner = (request: HelperRequest) => Promise<HelperResponse>;
@@ -246,12 +254,89 @@ function failureMessage(response: HelperResponse): string {
   return response.error ?? "写入系统日历失败";
 }
 
+/**
+ * Checks that everything recorded as written is still in the system calendar,
+ * and forgets what is not so the next push writes it again. Without this, a
+ * calendar or events deleted in the Calendar app would never come back: an
+ * ordinary push only sends what changed in studyPal.
+ */
+async function forgetMissingEvents(
+  db: Database,
+  run: HelperRunner,
+): Promise<PushResult | undefined> {
+  const links = db.query("SELECT key, event_id FROM calendar_links").all() as {
+    key: string;
+    event_id: string;
+  }[];
+  const calendarId = readSetting<string>(db, "system_calendar_id") ?? null;
+  if (links.length === 0 || calendarId === null) return undefined;
+
+  const response = await run({
+    calendarId,
+    calendarTitle: CALENDAR_TITLE,
+    upserts: [],
+    deletes: [],
+    verify: links.map((link) => link.event_id),
+  });
+  if (!response.ok) return { ok: false, message: failureMessage(response) };
+  if (response.calendarId)
+    writeSetting(db, "system_calendar_id", response.calendarId);
+
+  if (response.calendarRecreated) {
+    // The whole calendar is gone; every item has to be written again.
+    db.exec("DELETE FROM calendar_links");
+    return undefined;
+  }
+  const missing = new Set(response.missing ?? []);
+  const forget = db.query("DELETE FROM calendar_links WHERE key = ?");
+  db.transaction(() => {
+    for (const link of links)
+      if (missing.has(link.event_id)) forget.run(link.key);
+  })();
+  return undefined;
+}
+
+/**
+ * Deletes the studyPal calendar from the system, with everything in it, and
+ * switches mirroring off so it is not immediately written back.
+ */
+export async function clearSystemCalendar(
+  db: Database,
+  run: HelperRunner = runHelper,
+): Promise<PushResult> {
+  const calendarId = readSetting<string>(db, "system_calendar_id") ?? null;
+  // Only the calendar studyPal created is ever deleted, found by its
+  // identifier and never by its name.
+  if (calendarId !== null) {
+    const response = await run({
+      calendarId,
+      calendarTitle: CALENDAR_TITLE,
+      upserts: [],
+      deletes: [],
+      action: "clear",
+    });
+    if (!response.ok) return { ok: false, message: failureMessage(response) };
+  }
+  db.transaction(() => {
+    db.exec("DELETE FROM calendar_links");
+    db.exec(
+      "DELETE FROM settings WHERE key IN ('system_calendar_id', 'system_calendar_last')",
+    );
+  })();
+  setSystemCalendarEnabled(db, false);
+  return { ok: true, total: 0, written: 0, removed: 0 };
+}
+
 /** Brings the system calendar in line with the database. */
 export async function pushToSystemCalendar(
   db: Database,
   run: HelperRunner = runHelper,
-  retried = false,
+  options: { verify?: boolean; retried?: boolean } = {},
 ): Promise<PushResult> {
+  if (options.verify) {
+    const failure = await forgetMissingEvents(db, run);
+    if (failure) return failure;
+  }
   const items = buildItems(db);
   const links = new Map(
     (
@@ -294,8 +379,9 @@ export async function pushToSystemCalendar(
   if (response.calendarRecreated) {
     // The calendar was deleted outside studyPal; start over in the new one.
     db.exec("DELETE FROM calendar_links");
-    if (retried) return { ok: false, message: "系统日历被反复删除，无法写入" };
-    return pushToSystemCalendar(db, run, true);
+    if (options.retried)
+      return { ok: false, message: "系统日历被反复删除，无法写入" };
+    return pushToSystemCalendar(db, run, { retried: true });
   }
 
   const save = db.query(
@@ -326,6 +412,8 @@ export async function pushToSystemCalendar(
 
 export interface SystemCalendarStatus {
   enabled: boolean;
+  /** True when studyPal has a calendar of its own in the system. */
+  hasCalendar: boolean;
   /** Outcome of the latest push, if there was one. */
   last: (PushResult & { at: string }) | null;
 }
@@ -333,6 +421,7 @@ export interface SystemCalendarStatus {
 export function systemCalendarStatus(db: Database): SystemCalendarStatus {
   return {
     enabled: readSetting<boolean>(db, "system_calendar_enabled") ?? false,
+    hasCalendar: readSetting<string>(db, "system_calendar_id") !== undefined,
     last:
       readSetting<PushResult & { at: string }>(db, "system_calendar_last") ??
       null,
@@ -345,11 +434,13 @@ let queue: Promise<unknown> = Promise.resolve();
 export function pushNow(
   db: Database,
   run: HelperRunner = runHelper,
+  /** Also check that earlier writes are still there; used for manual pushes. */
+  options: { verify?: boolean } = {},
 ): Promise<PushResult> {
   const next = queue.then(async () => {
     let result: PushResult;
     try {
-      result = await pushToSystemCalendar(db, run);
+      result = await pushToSystemCalendar(db, run, options);
     } catch (error) {
       result = {
         ok: false,
@@ -362,6 +453,16 @@ export function pushNow(
     });
     return result;
   });
+  queue = next.catch(() => undefined);
+  return next;
+}
+
+/** Clears the system calendar after any push already running. */
+export function clearNow(
+  db: Database,
+  run: HelperRunner = runHelper,
+): Promise<PushResult> {
+  const next = queue.then(() => clearSystemCalendar(db, run));
   queue = next.catch(() => undefined);
   return next;
 }

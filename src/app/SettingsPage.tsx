@@ -261,6 +261,8 @@ function SystemCalendar() {
   );
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
+  /** True while the user is being asked to confirm clearing. */
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   const call = async (path: string, init: RequestInit) => {
     setBusy(true);
@@ -311,7 +313,7 @@ function SystemCalendar() {
                     void call("/api/system-calendar/push", { method: "POST" })
                   }
                 >
-                  立即写入
+                  检查并写入
                 </Button>
               )}
               <Button
@@ -337,11 +339,53 @@ function SystemCalendar() {
               : `${formatWhen(last.at)} 写入失败：${last.message ?? "未知原因"}`}
           </p>
         )}
-        {data && !data.enabled && (
+        {data?.enabled && (
           <p className="text-sm text-muted-foreground">
-            第一次开启时系统会询问是否允许访问日历。关闭后已写入的内容会留在系统日历里，可以在「日历」里删除「studyPal」日历。
+            平时只写入有变化的内容。如果在「日历」里删掉了某些条目或整个日历，点「检查并写入」会把缺的补回去。
           </p>
         )}
+        {data && !data.enabled && (
+          <p className="text-sm text-muted-foreground">
+            第一次开启时系统会询问是否允许访问日历。关闭后已写入的内容会留在系统日历里，可以用下面的「清除系统日历」删掉。
+          </p>
+        )}
+        {data?.hasCalendar &&
+          (confirmingClear ? (
+            <div className="flex flex-col gap-2 rounded-md border border-destructive/40 p-3 text-sm">
+              <p>
+                会从系统日历里删除整个「studyPal」日历和其中的所有条目及提醒，并关闭写入。studyPal
+                里的课表、日程和作业不受影响，之后重新开启会全部重新写入。
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => setConfirmingClear(false)}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmingClear(false);
+                    void call("/api/system-calendar/clear", { method: "POST" });
+                  }}
+                >
+                  确认清除
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              className="self-start"
+              disabled={busy}
+              onClick={() => setConfirmingClear(true)}
+            >
+              清除系统日历
+            </Button>
+          ))}
         {problem && (
           <p role="alert" className="text-sm text-destructive">
             {problem}
