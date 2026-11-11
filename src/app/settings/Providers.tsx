@@ -16,7 +16,8 @@ const KIND_LABEL: Record<ProviderKind, string> = {
   anthropic: "Anthropic",
   "openai-compatible": "OpenAI 兼容",
   deepseek: "DeepSeek",
-  opencode: "OpenCode",
+  opencode: "OpenCode（按量付费）",
+  "opencode-go": "OpenCode Go",
 };
 
 /** The model suggested when a kind is chosen; empty where there is no obvious one. */
@@ -25,6 +26,7 @@ const DEFAULT_MODEL: Record<ProviderKind, string> = {
   "openai-compatible": "",
   deepseek: "deepseek-flash",
   opencode: "",
+  "opencode-go": "",
 };
 
 const MODEL_HINT: Record<ProviderKind, string> = {
@@ -32,6 +34,7 @@ const MODEL_HINT: Record<ProviderKind, string> = {
   "openai-compatible": "服务商提供的模型名称",
   deepseek: "deepseek-flash 或 deepseek-v4-pro",
   opencode: "例如 kimi-k3、glm-5.3、deepseek-v4-pro",
+  "opencode-go": "例如 kimi-k3、glm-5.3、deepseek-v4-pro",
 };
 
 /** Shown as the Base URL placeholder; kinds with a built-in address may leave it blank. */
@@ -40,6 +43,7 @@ const BASE_URL_HINT: Record<ProviderKind, string> = {
   "openai-compatible": "https://example.com/v1",
   deepseek: "https://api.deepseek.com",
   opencode: "https://opencode.ai/inference/openai/v1",
+  "opencode-go": "https://opencode.ai/inference/go/openai/v1",
 };
 
 const selectClass =
@@ -98,7 +102,8 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
           >
             <option value="anthropic">Anthropic（Claude）</option>
             <option value="deepseek">DeepSeek</option>
-            <option value="opencode">OpenCode</option>
+            <option value="opencode-go">OpenCode Go（订阅）</option>
+            <option value="opencode">OpenCode（按量付费）</option>
             <option value="openai-compatible">其他 OpenAI 兼容接口</option>
           </select>
         </div>
