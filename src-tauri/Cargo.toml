@@ -15,3 +15,4 @@ tauri-build = { version = "2.7.4", features = [] }
 [dependencies]
 tauri = { version = "2.12.5", features = [] }
 getrandom = "0.3"
+tauri-plugin-single-instance = "2"

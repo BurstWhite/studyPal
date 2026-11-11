@@ -90,6 +90,15 @@ fn start(app: &mut tauri::App) -> Result<(), BoxError> {
   Ok(())
 }
 
+/// Brings the main window to the front, restoring it if it was minimized.
+fn show_main_window(app: &tauri::AppHandle) {
+  if let Some(window) = app.get_webview_window("main") {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+  }
+}
+
 fn stop_server(app: &tauri::AppHandle) {
   let Some(server) = app.try_state::<Server>() else {
     return;
@@ -104,12 +113,19 @@ fn stop_server(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    // Must be the first plugin. A second launch hands over to the instance
+    // already running instead of starting another server on the same port.
+    .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+      show_main_window(app);
+    }))
     .setup(|app| start(app))
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
-    .run(|app, event| {
-      if let RunEvent::Exit = event {
-        stop_server(app);
-      }
+    .run(|app, event| match event {
+      RunEvent::Exit => stop_server(app),
+      // Clicking the Dock icon while the app is running.
+      #[cfg(target_os = "macos")]
+      RunEvent::Reopen { .. } => show_main_window(app),
+      _ => {}
     });
 }
