@@ -11,8 +11,8 @@
     "app:build": "tauri build",
     "test": "bun test",
     "typecheck": "bun check",
-    "fmt": "bun fmt src build-sidecar.ts",
-    "fmt:check": "bun fmt --check src build-sidecar.ts"
+    "format": "bun fmt src build-sidecar.ts",
+    "format:check": "bun fmt --check src build-sidecar.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.7.0",
