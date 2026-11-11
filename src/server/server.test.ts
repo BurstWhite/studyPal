@@ -108,7 +108,7 @@ describe("auth", () => {
       token,
     );
     expect(ok.status).toBe(302);
-    expect(ok.headers.get("location")).toBe("/");
+    expect(ok.headers.get("location")).toMatch(/^\/\?launch=[0-9a-z]+$/);
     expect(ok.headers.get("set-cookie")).toContain(`studypal_session=${token}`);
 
     const bad = handleAuth(

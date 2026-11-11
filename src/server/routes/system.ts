@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { guarded } from "../auth";
+import { config } from "../config";
 import { getDb } from "../db";
 
 export interface Overview {
@@ -28,7 +29,8 @@ export function readOverview(db: Database): Overview {
 export const systemRoutes = {
   /** Unauthenticated liveness probe used by the desktop shell at startup. */
   "/api/health": {
-    GET: () => Response.json({ ok: true, app: "studypal" }),
+    GET: () =>
+      Response.json({ ok: true, app: "studypal", builtAt: config.builtAt }),
   },
   "/api/overview": {
     GET: guarded(() => Response.json(readOverview(getDb()))),

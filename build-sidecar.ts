@@ -33,6 +33,8 @@ const result = await Bun.build({
   minify: true,
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
+    // Shown in the settings page so it is clear which build is running.
+    "process.env.STUDYPAL_BUILT_AT": JSON.stringify(new Date().toISOString()),
   },
   compile: { outfile },
 });
