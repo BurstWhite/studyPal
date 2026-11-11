@@ -824,6 +824,31 @@ describe("sync", () => {
     ]);
   });
 
+  test("reminders set on classes and exams survive the next sync", async () => {
+    const zju = fakeZju({ password: "correct horse", todos: [] });
+    const db = openDatabase(":memory:");
+    await runSync(db, credentials, { fetchImpl: zju.fetchImpl, now });
+    db.exec(
+      "UPDATE events SET reminders = '[15]' WHERE source = 'zdbk' AND starts_at LIKE '2026-11-09%'",
+    );
+    db.exec("UPDATE events SET reminders = '[120]' WHERE source = 'exam'");
+
+    await runSync(db, credentials, { fetchImpl: zju.fetchImpl, now });
+    expect(
+      db
+        .query(
+          "SELECT source, substr(starts_at, 1, 10) AS day, reminders FROM events WHERE reminders IS NOT NULL ORDER BY source",
+        )
+        .all(),
+    ).toEqual([
+      { source: "exam", day: "2027-01-12", reminders: "[120]" },
+      { source: "zdbk", day: "2026-11-09", reminders: "[15]" },
+    ]);
+    expect(db.query("SELECT count(*) AS n FROM events").get()).toEqual({
+      n: 16,
+    });
+  });
+
   test("details that cannot be fetched do not fail the sync and are retried", async () => {
     const zju = fakeZju({
       password: "correct horse",

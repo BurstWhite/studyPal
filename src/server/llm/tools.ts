@@ -9,6 +9,15 @@ import {
   parseEventInput,
   ValidationError,
 } from "../calendar/store";
+import {
+  DEFAULT_ASSIGNMENT_REMINDERS,
+  DEFAULT_EXAM_REMINDERS,
+  effectiveReminders,
+  parseReminders,
+  ReminderError,
+  setReminders,
+  type ReminderTarget,
+} from "../reminders";
 import { freeSlots, toBeijingIso, type Interval } from "../scheduler/slots";
 
 export interface ToolDefinition {
@@ -29,6 +38,33 @@ export interface ToolOutcome {
 }
 
 const MAX_RANGE_DAYS = 62;
+
+/** Reads an optional reminders field of a tool input. */
+function reminders(input: Record<string, unknown>, key: string): number[] {
+  if (input[key] === undefined || input[key] === null) return [];
+  try {
+    return parseReminders(input[key]);
+  } catch (error) {
+    if (error instanceof ReminderError) throw new InputError(error.message);
+    throw error;
+  }
+}
+
+/**
+ * Reminders are alarms in the system calendar. When mirroring is off they are
+ * saved but silent, which the model should pass on.
+ */
+function reminderNote(db: Database, set: boolean): { note?: string } {
+  if (!set) return {};
+  const row = db
+    .query("SELECT value FROM settings WHERE key = 'system_calendar_enabled'")
+    .get() as { value: string } | null;
+  return row?.value === "true"
+    ? {}
+    : {
+        note: "提醒已保存，但系统日历写入没有开启，所以现在不会响。请告诉用户到「设置 → 系统日历」开启。",
+      };
+}
 const MAX_ROWS = 200;
 /** How much of an assignment's description is shown to the model. */
 const DESCRIPTION_FOR_MODEL = 1500;
@@ -36,6 +72,14 @@ const DESCRIPTION_FOR_MODEL = 1500;
 const instantSchema = {
   type: "string",
   description: "ISO 8601 时间，带时区，例如 2026-11-10T19:00:00+08:00",
+};
+
+const remindersSchema = {
+  type: "array",
+  maxItems: 5,
+  items: { type: "integer", minimum: 0, maximum: 40320 },
+  description:
+    "提前多少分钟提醒，可以给多个，例如 [1440, 60] 表示提前一天和提前一小时。0 表示到点提醒。",
 };
 
 const object = (properties: Record<string, unknown>, required: string[]) => ({
@@ -90,6 +134,7 @@ export const TOOLS: ToolDefinition[] = [
         ends_at: instantSchema,
         location: { type: "string" },
         notes: { type: "string" },
+        reminders_minutes_before: remindersSchema,
       },
       ["title", "starts_at", "ends_at"],
     ),
@@ -115,12 +160,32 @@ export const TOOLS: ToolDefinition[] = [
                 description:
                   "这个学习块对应的作业编号（来自 list_assignments），没有就不填",
               },
+              reminders_minutes_before: remindersSchema,
             },
             ["title", "starts_at", "ends_at"],
           ),
         },
       },
       ["blocks"],
+    ),
+    write: true,
+  },
+  {
+    name: "set_reminders",
+    description:
+      "给一条已有的日程（含课程和考试）、作业或学习块设置提醒。新列表会替换这一项上之前由用户设置的提醒；空列表表示取消。作业自带的截止前 48 小时和 24 小时提醒、考试自带的提前一周和一天提醒始终保留，不需要重复设置。作业的提醒时间从截止时间往前算，其余从开始时间往前算。用户会先看到并确认。",
+    inputSchema: object(
+      {
+        target: {
+          type: "string",
+          enum: ["event", "assignment", "study_block"],
+          description:
+            "event 指 list_events 里 kind 为 event、class 或 exam 的条目",
+        },
+        id: { type: "integer" },
+        minutes_before: remindersSchema,
+      },
+      ["target", "id", "minutes_before"],
     ),
     write: true,
   },
@@ -197,12 +262,13 @@ interface BlockRow {
   starts_at: string;
   ends_at: string;
   done: number;
+  reminders: string | null;
 }
 
 function blocksBetween(db: Database, from: Date, to: Date): BlockRow[] {
   const rows = db
     .query(
-      "SELECT id, assignment_id, title, starts_at, ends_at, done FROM study_blocks",
+      "SELECT id, assignment_id, title, starts_at, ends_at, done, reminders FROM study_blocks",
     )
     .all() as BlockRow[];
   return rows.filter(
@@ -210,8 +276,24 @@ function blocksBetween(db: Database, from: Date, to: Date): BlockRow[] {
   );
 }
 
+/** Shows an item's reminders to the model, when it has any. */
+function remindersField(
+  defaults: number[],
+  stored: string | null,
+): { reminders_minutes_before?: number[] } {
+  const all = effectiveReminders(defaults, stored);
+  return all.length > 0 ? { reminders_minutes_before: all } : {};
+}
+
 function listEvents(db: Database, input: Input): unknown {
   const { from, to } = range(input);
+  const eventReminders = new Map(
+    (
+      db
+        .query("SELECT id, reminders FROM events WHERE reminders IS NOT NULL")
+        .all() as { id: number; reminders: string }[]
+    ).map((row) => [row.id, row.reminders]),
+  );
   const events = listEntries(db, from, to).map((entry) => ({
     kind:
       entry.source === "manual"
@@ -219,11 +301,16 @@ function listEvents(db: Database, input: Input): unknown {
         : entry.source === "exam"
           ? "exam"
           : "class",
+    id: entry.id,
     title: entry.title,
     start: toBeijingIso(new Date(entry.start)),
     end: toBeijingIso(new Date(entry.end)),
     all_day: entry.allDay,
     location: entry.location,
+    ...remindersField(
+      entry.source === "exam" ? DEFAULT_EXAM_REMINDERS : [],
+      eventReminders.get(entry.id) ?? null,
+    ),
   }));
   const blocks = blocksBetween(db, from, to).map((row) => ({
     kind: "study_block",
@@ -233,6 +320,7 @@ function listEvents(db: Database, input: Input): unknown {
     end: toBeijingIso(new Date(row.ends_at)),
     done: row.done === 1,
     assignment_id: row.assignment_id,
+    ...remindersField([], row.reminders),
   }));
   const all = [...events, ...blocks].sort((a, b) =>
     a.start.localeCompare(b.start),
@@ -244,7 +332,7 @@ function listAssignments(db: Database, input: Input): unknown {
   const includeClosed = input.include_closed === true;
   const rows = db
     .query(
-      `SELECT id, course, title, due_at, status, description, attachments FROM assignments
+      `SELECT id, course, title, due_at, status, description, attachments, reminders FROM assignments
        ${includeClosed ? "" : "WHERE status = 'open'"}
        ORDER BY status != 'open', due_at IS NULL, due_at, id LIMIT ${MAX_ROWS}`,
     )
@@ -256,6 +344,7 @@ function listAssignments(db: Database, input: Input): unknown {
     status: string;
     description: string | null;
     attachments: string | null;
+    reminders: string | null;
   }[];
   return {
     assignments: rows.map((row) => {
@@ -268,6 +357,9 @@ function listAssignments(db: Database, input: Input): unknown {
         title: row.title,
         due: row.due_at ? toBeijingIso(new Date(row.due_at)) : null,
         status: row.status,
+        ...(row.due_at
+          ? remindersField(DEFAULT_ASSIGNMENT_REMINDERS, row.reminders)
+          : {}),
         // The teacher's own wording is what makes a workload estimate possible.
         ...(row.description
           ? {
@@ -317,6 +409,7 @@ function findFreeSlots(db: Database, input: Input): unknown {
 }
 
 function createEventTool(db: Database, input: Input): unknown {
+  const wanted = reminders(input, "reminders_minutes_before");
   try {
     const id = createEvent(
       db,
@@ -328,7 +421,8 @@ function createEventTool(db: Database, input: Input): unknown {
         notes: input.notes,
       }),
     );
-    return { created_event_id: id };
+    setReminders(db, "event", id, wanted);
+    return { created_event_id: id, ...reminderNote(db, wanted.length > 0) };
   } catch (error) {
     if (error instanceof ValidationError) throw new InputError(error.message);
     throw error;
@@ -367,6 +461,7 @@ function createStudyBlocks(db: Database, input: Input): unknown {
       endsAt: toBeijingIso(end),
       minutes: Math.round((end.getTime() - start.getTime()) / 60_000),
       assignmentId,
+      reminders: reminders(block, "reminders_minutes_before"),
     };
   });
 
@@ -376,10 +471,54 @@ function createStudyBlocks(db: Database, input: Input): unknown {
   );
   const ids: number[] = [];
   db.transaction(() => {
-    for (const block of blocks)
-      ids.push(Number(insert.run(block).lastInsertRowid));
+    for (const { reminders: wanted, ...block } of blocks) {
+      const id = Number(insert.run(block).lastInsertRowid);
+      setReminders(db, "study_block", id, wanted);
+      ids.push(id);
+    }
   })();
-  return { created_study_block_ids: ids };
+  return {
+    created_study_block_ids: ids,
+    ...reminderNote(
+      db,
+      blocks.some((block) => block.reminders.length > 0),
+    ),
+  };
+}
+
+const REMINDER_TARGETS: Record<ReminderTarget, string> = {
+  event: "日程",
+  assignment: "作业",
+  study_block: "学习块",
+};
+
+function setRemindersTool(db: Database, input: Input): unknown {
+  const target = input.target as ReminderTarget;
+  if (!(target in REMINDER_TARGETS)) {
+    throw new InputError("target 必须是 event、assignment 或 study_block");
+  }
+  const id = integer(input, "id");
+  if (input.minutes_before === undefined) {
+    throw new InputError("需要 minutes_before");
+  }
+  const wanted = reminders(input, "minutes_before");
+  if (target === "assignment") {
+    const row = db
+      .query("SELECT due_at FROM assignments WHERE id = ?")
+      .get(id) as { due_at: string | null } | null;
+    if (row && row.due_at === null) {
+      throw new InputError("这项作业没有截止时间，无法设置提醒");
+    }
+  }
+  if (!setReminders(db, target, id, wanted)) {
+    throw new InputError(`${REMINDER_TARGETS[target]} ${id} 不存在`);
+  }
+  return {
+    target,
+    id,
+    reminders_minutes_before: wanted,
+    ...reminderNote(db, wanted.length > 0),
+  };
 }
 
 function setStudyBlockDone(db: Database, input: Input): unknown {
@@ -406,6 +545,7 @@ const HANDLERS: Record<string, (db: Database, input: Input) => unknown> = {
   find_free_slots: findFreeSlots,
   create_event: createEventTool,
   create_study_blocks: createStudyBlocks,
+  set_reminders: setRemindersTool,
   set_study_block_done: setStudyBlockDone,
   delete_study_block: deleteStudyBlock,
 };

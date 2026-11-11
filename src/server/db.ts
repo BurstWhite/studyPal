@@ -124,6 +124,13 @@ const migrations: string[] = [
   ALTER TABLE assignments ADD COLUMN attachments TEXT;   -- JSON array of file names
   ALTER TABLE assignments ADD COLUMN details_at TEXT;    -- when details were last fetched
   `,
+  `
+  -- Reminders the user asked for, as a JSON array of minutes before the item.
+  -- They add to the built-in ones (deadlines and exams have their own).
+  ALTER TABLE events ADD COLUMN reminders TEXT;
+  ALTER TABLE assignments ADD COLUMN reminders TEXT;
+  ALTER TABLE study_blocks ADD COLUMN reminders TEXT;
+  `,
 ];
 
 export function migrate(db: Database): number {

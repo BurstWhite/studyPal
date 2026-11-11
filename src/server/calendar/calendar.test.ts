@@ -431,6 +431,69 @@ describe("system calendar", () => {
   });
 });
 
+describe("reminders in the system calendar", () => {
+  const alarms = (db: ReturnType<typeof openDatabase>) =>
+    Object.fromEntries(buildItems(db).map((item) => [item.title, item.alarms]));
+
+  function seed() {
+    const db = openDatabase(":memory:");
+    db.exec(`
+      INSERT INTO events (id, source, source_id, title, starts_at, ends_at, reminders) VALUES
+        (1, 'manual', NULL, '组会', '2026-11-10T14:00:00+08:00', '2026-11-10T15:00:00+08:00', '[30]'),
+        (2, 'manual', NULL, '跑步', '2026-11-10T07:00:00+08:00', '2026-11-10T08:00:00+08:00', NULL),
+        (3, 'exam', 'x|final', '期末考试：数据结构', '2027-01-12T08:00:00+08:00', '2027-01-12T10:00:00+08:00', '[120]'),
+        (4, 'exam', 'y|final', '期末考试：大学物理', '2027-01-13T08:00:00+08:00', '2027-01-13T10:00:00+08:00', NULL);
+      INSERT INTO assignments (id, title, due_at, status, reminders) VALUES
+        (1, '实验三', '2026-11-20T23:59:00+08:00', 'open', '[120, 10]'),
+        (2, '实验四', '2026-11-21T23:59:00+08:00', 'open', NULL);
+      INSERT INTO study_blocks (id, title, starts_at, ends_at, estimated_minutes, reminders) VALUES
+        (1, '写实验三', '2026-11-18T19:00:00+08:00', '2026-11-18T21:00:00+08:00', 120, '[15]');
+    `);
+    return db;
+  }
+
+  test("user-set reminders become alarms, on top of the built-in ones", () => {
+    expect(alarms(seed())).toEqual({
+      组会: [30],
+      跑步: [],
+      // A week and a day ahead are built in; two hours was asked for.
+      "期末考试：数据结构": [10080, 1440, 120],
+      "期末考试：大学物理": [10080, 1440],
+      // Deadline alarms count from the entry's start, 30 minutes before the
+      // due time: 48 h, 24 h, 2 h and 10 min before due.
+      "截止：实验三": [2850, 1410, 90, -20],
+      "截止：实验四": [2850, 1410],
+      写实验三: [15],
+    });
+  });
+
+  test("changing a reminder rewrites just that item", async () => {
+    const db = seed();
+    const requests: HelperRequest[] = [];
+    let next = 1;
+    const run = async (request: HelperRequest): Promise<HelperResponse> => {
+      requests.push(request);
+      return {
+        ok: true,
+        calendarId: "CAL-1",
+        calendarRecreated: false,
+        eventIds: Object.fromEntries(
+          request.upserts.map((item) => [
+            item.key,
+            item.eventId ?? `EV-${next++}`,
+          ]),
+        ),
+      };
+    };
+    await pushToSystemCalendar(db, run);
+    db.exec("UPDATE events SET reminders = '[60]' WHERE id = 2");
+    await pushToSystemCalendar(db, run);
+    expect(
+      requests[1]!.upserts.map((item) => [item.title, item.alarms]),
+    ).toEqual([["跑步", [60]]]);
+  });
+});
+
 describe("system calendar repair and clearing", () => {
   /** A stand-in for the EventKit helper: one calendar holding events by id. */
   function fakeSystem() {

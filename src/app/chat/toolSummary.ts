@@ -1,3 +1,6 @@
+// Only types and pure helpers are imported from the server side.
+import { describeLead } from "../../server/reminders";
+
 /** Describes a tool call in the user's terms, for the chat view. */
 
 interface Summary {
@@ -36,6 +39,20 @@ function range(input: Input): string[] {
   return [`${day(from)} 至 ${day(to)}`];
 }
 
+/** "提醒：提前 1 天、提前 1 小时", or nothing when no reminders are given. */
+function remindersLine(value: unknown): string {
+  const list = Array.isArray(value)
+    ? value.filter((item): item is number => typeof item === "number")
+    : [];
+  return list.length > 0 ? `提醒：${list.map(describeLead).join("、")}` : "";
+}
+
+const TARGET_LABEL: Record<string, string> = {
+  event: "日程",
+  assignment: "作业",
+  study_block: "学习块",
+};
+
 export function summarizeTool(name: string, rawInput: unknown): Summary {
   const input = (
     typeof rawInput === "object" && rawInput !== null ? rawInput : {}
@@ -58,7 +75,8 @@ export function summarizeTool(name: string, rawInput: unknown): Summary {
           ]
             .filter(Boolean)
             .join(" · "),
-        ],
+          remindersLine(input.reminders_minutes_before),
+        ].filter(Boolean),
       };
     case "create_study_blocks": {
       const blocks = Array.isArray(input.blocks)
@@ -67,10 +85,22 @@ export function summarizeTool(name: string, rawInput: unknown): Summary {
       return {
         label: `创建 ${blocks.length} 个学习块`,
         lines: blocks.map((block) =>
-          [String(block.title ?? ""), when(block.starts_at, block.ends_at)]
+          [
+            String(block.title ?? ""),
+            when(block.starts_at, block.ends_at),
+            remindersLine(block.reminders_minutes_before),
+          ]
             .filter(Boolean)
             .join(" · "),
         ),
+      };
+    }
+    case "set_reminders": {
+      const target = TARGET_LABEL[String(input.target)] ?? "条目";
+      const line = remindersLine(input.minutes_before);
+      return {
+        label: line ? `给${target}设置提醒` : `取消${target}的提醒`,
+        lines: [`${target} #${String(input.id ?? "?")}`, line].filter(Boolean),
       };
     }
     case "set_study_block_done":

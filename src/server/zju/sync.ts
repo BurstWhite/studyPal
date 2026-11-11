@@ -83,6 +83,25 @@ export function buildClasses(
   return [...classes.values()];
 }
 
+/**
+ * Deletes every synced event of one source and returns the reminders the
+ * user had set on them, by source id, so they survive being re-inserted.
+ */
+function takeReminders(db: Database, source: string): Map<string, string> {
+  const rows = db
+    .query(
+      "SELECT source_id, reminders FROM events WHERE source = ? AND reminders IS NOT NULL",
+    )
+    .all(source) as { source_id: string; reminders: string }[];
+  db.query("DELETE FROM events WHERE source = ?").run(source);
+  return new Map(rows.map((row) => [row.source_id, row.reminders]));
+}
+
+function restoreReminders(db: Database, id: number, reminders?: string): void {
+  if (reminders === undefined) return;
+  db.query("UPDATE events SET reminders = ? WHERE id = ?").run(reminders, id);
+}
+
 /** Replaces every synced class with `classes`. */
 export function storeClasses(db: Database, classes: DatedClass[]): void {
   const insert = db.query(
@@ -90,8 +109,11 @@ export function storeClasses(db: Database, classes: DatedClass[]): void {
      VALUES ('zdbk', $sourceId, $title, $location, $notes, $startsAt, $endsAt)`,
   );
   db.transaction(() => {
-    db.exec("DELETE FROM events WHERE source = 'zdbk'");
-    for (const item of classes) insert.run({ ...item });
+    const kept = takeReminders(db, "zdbk");
+    for (const item of classes) {
+      const id = Number(insert.run({ ...item }).lastInsertRowid);
+      restoreReminders(db, id, kept.get(item.sourceId));
+    }
   })();
 }
 
@@ -102,9 +124,9 @@ export function storeExams(db: Database, exams: Exam[]): void {
      VALUES ('exam', $id, $title, $location, $notes, $startsAt, $endsAt)`,
   );
   db.transaction(() => {
-    db.exec("DELETE FROM events WHERE source = 'exam'");
+    const kept = takeReminders(db, "exam");
     for (const exam of exams) {
-      insert.run({
+      const result = insert.run({
         id: exam.id,
         title: `${exam.kind === "midterm" ? "期中考试" : "期末考试"}：${exam.course}`,
         location: exam.location,
@@ -112,6 +134,7 @@ export function storeExams(db: Database, exams: Exam[]): void {
         startsAt: exam.startsAt,
         endsAt: exam.endsAt,
       });
+      restoreReminders(db, Number(result.lastInsertRowid), kept.get(exam.id));
     }
   })();
 }
