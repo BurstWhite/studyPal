@@ -160,3 +160,59 @@ export function academicYearOf(now: Date): string {
       : local.getUTCFullYear() - 1;
   return `${start}-${start + 1}`;
 }
+
+/** Periods further apart than this are separate sittings (lunch, dinner). */
+const MAX_BREAK_MINUTES = 20;
+
+const minutesOf = (time: string) =>
+  Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+
+/**
+ * Joins slots the academic system reports separately although they are one
+ * sitting of the same course: for example period 6 on its own followed by
+ * periods 7–8, same room, same weeks. Slots separated by more than a short
+ * break stay apart, so a morning class never fuses with an afternoon one.
+ */
+export function joinAdjacentSlots(
+  slots: TimetableSlot[],
+  calendar: SchoolCalendar,
+): TimetableSlot[] {
+  const sameSitting = (a: TimetableSlot, b: TimetableSlot) =>
+    a.name === b.name &&
+    a.dayOfWeek === b.dayOfWeek &&
+    a.location === b.location &&
+    a.teacher === b.teacher &&
+    a.oddWeeks === b.oddWeeks &&
+    a.evenWeeks === b.evenWeeks &&
+    a.firstHalf === b.firstHalf &&
+    a.secondHalf === b.secondHalf;
+
+  const sorted = slots
+    .map((slot) => ({ ...slot }))
+    .sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.firstPeriod - b.firstPeriod);
+
+  const joined: TimetableSlot[] = [];
+  for (const slot of sorted) {
+    // The earlier slot of the same sitting that ends right where this starts.
+    const previous = joined.find(
+      (candidate) =>
+        sameSitting(candidate, slot) &&
+        candidate.firstPeriod + candidate.periodCount === slot.firstPeriod,
+    );
+    const lastPeriod = previous
+      ? calendar.periods[previous.firstPeriod + previous.periodCount - 1]
+      : undefined;
+    const nextPeriod = calendar.periods[slot.firstPeriod];
+    if (
+      previous &&
+      lastPeriod &&
+      nextPeriod &&
+      minutesOf(nextPeriod[0]) - minutesOf(lastPeriod[1]) <= MAX_BREAK_MINUTES
+    ) {
+      previous.periodCount += slot.periodCount;
+    } else {
+      joined.push(slot);
+    }
+  }
+  return joined;
+}

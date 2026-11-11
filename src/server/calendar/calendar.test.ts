@@ -506,6 +506,33 @@ describe("system calendar repair and clearing", () => {
     return db;
   }
 
+  test("re-syncing the same classes does not rewrite them in the system calendar", async () => {
+    const db = openDatabase(":memory:");
+    const insert = (id: number) =>
+      db
+        .query(
+          `INSERT INTO events (id, source, source_id, title, starts_at, ends_at)
+           VALUES (?, 'zdbk', '2026-2027-1|数据结构|2026-11-09|6', '数据结构',
+                   '2026-11-09T13:25:00+08:00', '2026-11-09T15:50:00+08:00')`,
+        )
+        .run(id);
+    insert(1);
+    const system = fakeSystem();
+    expect(buildItems(db)[0]!.key).toBe(
+      "zdbk:2026-2027-1|数据结构|2026-11-09|6",
+    );
+    await pushToSystemCalendar(db, system.run);
+
+    // A sync deletes and re-inserts every class, which gives rows new ids.
+    db.exec("DELETE FROM events");
+    insert(42);
+    expect(await pushToSystemCalendar(db, system.run)).toMatchObject({
+      written: 0,
+      removed: 0,
+    });
+    expect(system.state.calls).toHaveLength(1);
+  });
+
   test("an ordinary push does not notice events deleted in the Calendar app", async () => {
     const db = seed();
     const system = fakeSystem();

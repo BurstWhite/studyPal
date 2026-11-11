@@ -86,11 +86,12 @@ export function buildItems(db: Database): CalendarItem[] {
 
   const events = db
     .query(
-      "SELECT id, source, title, location, notes, starts_at, ends_at, all_day, rrule FROM events ORDER BY id",
+      "SELECT id, source, source_id, title, location, notes, starts_at, ends_at, all_day, rrule FROM events ORDER BY id",
     )
     .all() as {
     id: number;
     source: string;
+    source_id: string | null;
     title: string;
     location: string | null;
     notes: string | null;
@@ -103,7 +104,9 @@ export function buildItems(db: Database): CalendarItem[] {
     const allDay = row.all_day === 1;
     const parsed = row.rrule ? parseRule(row.rrule) : null;
     items.push({
-      key: `event-${row.id}`,
+      // Synced rows are re-created on every sync and get new row ids, so they
+      // are identified by what they are in the source system instead.
+      key: row.source_id ? `${row.source}:${row.source_id}` : `event-${row.id}`,
       title: row.title,
       // All-day events keep the local date they were entered with.
       start: allDay ? row.starts_at.slice(0, 10) : instant(row.starts_at),
