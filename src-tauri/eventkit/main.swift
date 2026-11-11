@@ -41,6 +41,10 @@ struct Request: Decodable {
   let upserts: [Item]
   /// Event identifiers to remove.
   let deletes: [String]
+  /// Event identifiers to check; those no longer in the calendar are reported.
+  let verify: [String]?
+  /// "clear" deletes the whole calendar instead of writing to it.
+  let action: String?
 }
 
 struct Response: Encodable {
@@ -53,6 +57,10 @@ struct Response: Encodable {
   /// identifiers from earlier runs are then void.
   var calendarRecreated = false
   var eventIds: [String: String] = [:]
+  /// Of the identifiers sent in `verify`, those that no longer exist.
+  var missing: [String] = []
+  /// True when "clear" found and deleted the calendar.
+  var removed = false
 }
 
 struct Failure: Error {
@@ -192,7 +200,19 @@ func apply(_ item: Item, to event: EKEvent) throws {
   event.recurrenceRules = try item.rule.map { [try recurrence($0)] }
 }
 
+/// Deletes the calendar studyPal created. It is found by identifier only, so
+/// another calendar that happens to share the name is never touched.
+func clear(_ request: Request) throws -> Response {
+  var response = Response()
+  if let id = request.calendarId, let calendar = store.calendar(withIdentifier: id) {
+    try store.removeCalendar(calendar, commit: true)
+    response.removed = true
+  }
+  return response
+}
+
 func run(_ request: Request) throws -> Response {
+  if request.action == "clear" { return try clear(request) }
   var response = Response()
   let (calendar, recreated) = try resolveCalendar(
     id: request.calendarId, title: request.calendarTitle)
@@ -200,6 +220,13 @@ func run(_ request: Request) throws -> Response {
   response.calendarRecreated = recreated
   // The caller's identifiers point into the lost calendar; it will resend.
   if recreated { return response }
+
+  for id in request.verify ?? [] {
+    let event = store.event(withIdentifier: id)
+    if event?.calendar?.calendarIdentifier != calendar.calendarIdentifier {
+      response.missing.append(id)
+    }
+  }
 
   for id in request.deletes {
     guard let event = store.event(withIdentifier: id),
