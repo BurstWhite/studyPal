@@ -8,6 +8,10 @@
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { App } from "./App";
+import { startTheme } from "./app/theme";
+
+// Before the first render, so the app never paints in the wrong theme.
+startTheme();
 
 const elem = document.getElementById("root")!;
 const app = (

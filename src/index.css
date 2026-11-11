@@ -3,6 +3,12 @@
 @layer base {
   :root {
     @apply font-sans;
+    /* Native controls (date pickers, checkboxes, scrollbars) follow the theme. */
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
   }
 
   body {

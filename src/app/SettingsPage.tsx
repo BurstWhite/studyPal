@@ -14,6 +14,7 @@ import type { AccountStatus, SyncLogEntry } from "../server/routes/zju";
 import type { SyncResult } from "../server/zju/sync";
 import { api, useQuery } from "./api";
 import { PageHeader } from "./PageHeader";
+import { Appearance } from "./settings/Appearance";
 import { ClaudeBridge } from "./settings/ClaudeBridge";
 import { Providers } from "./settings/Providers";
 
@@ -417,6 +418,7 @@ export function SettingsPage() {
       <SystemCalendar />
       <Providers />
       <ClaudeBridge />
+      <Appearance />
       <BuildInfo />
     </div>
   );
