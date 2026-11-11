@@ -396,6 +396,19 @@ function SystemCalendar() {
   );
 }
 
+/** Which build is running, so an update can be confirmed at a glance. */
+function BuildInfo() {
+  const { data } = useQuery<{ builtAt: string }>("/api/health");
+  if (!data) return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      {data.builtAt
+        ? `当前版本构建于 ${new Date(data.builtAt).toLocaleString("zh-CN", { hour12: false })}`
+        : "开发模式"}
+    </p>
+  );
+}
+
 export function SettingsPage() {
   return (
     <div className="flex max-w-2xl flex-col gap-4">
@@ -404,6 +417,7 @@ export function SettingsPage() {
       <SystemCalendar />
       <Providers />
       <ClaudeBridge />
+      <BuildInfo />
     </div>
   );
 }

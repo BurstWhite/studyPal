@@ -46,7 +46,11 @@ export function handleAuth(req: Request, token = config.token): Response {
   if (token && !safeEqual(given, token)) {
     return new Response("Forbidden", { status: 403 });
   }
-  const headers = new Headers({ Location: "/" });
+  // A different address on every launch, so the window cannot show a page it
+  // cached from an older build of the app.
+  const headers = new Headers({
+    Location: `/?launch=${Date.now().toString(36)}`,
+  });
   if (token) {
     headers.set(
       "Set-Cookie",
