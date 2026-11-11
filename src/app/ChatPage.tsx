@@ -18,7 +18,7 @@ type LiveTool = Extract<DisplayItem, { type: "tool" }> & {
   awaiting?: boolean;
   declined?: boolean;
 };
-type LiveItem = Exclude<DisplayItem, { type: "tool" }> | LiveTool;
+export type LiveItem = Exclude<DisplayItem, { type: "tool" }> | LiveTool;
 
 /** Reads a `text/event-stream` body and yields each event's JSON payload. */
 async function* readEvents(response: Response): AsyncGenerator<StreamEvent> {
@@ -43,6 +43,45 @@ async function* readEvents(response: Response): AsyncGenerator<StreamEvent> {
 
 const markdownClass =
   "text-sm leading-relaxed [&_p]:my-2 first:[&_p]:mt-0 last:[&_p]:mb-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:mt-3 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:font-semibold [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:text-[0.85em] [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_a]:underline [&_table]:my-2 [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground";
+
+/**
+ * Whether the assistant is working but has nothing on screen yet: right after
+ * a message is sent, after tool results go back, or while it is thinking.
+ */
+export function isWaitingForReply(
+  items: LiveItem[],
+  running: boolean,
+  thinking: boolean,
+): boolean {
+  if (!running) return false;
+  // A card waiting for the user's decision means the wait is on them.
+  if (items.some((item) => item.type === "tool" && item.awaiting)) return false;
+  if (thinking) return true;
+  const last = items.at(-1);
+  if (!last || last.type === "user") return true;
+  // A finished tool call: the results are with the model now. A tool still
+  // running shows its own spinner, and streaming text speaks for itself.
+  return last.type === "tool" && last.result !== undefined;
+}
+
+/** Three pulsing dots in a reply bubble, shown until the first words arrive. */
+function TypingIndicator() {
+  return (
+    <div
+      role="status"
+      aria-label="正在回复"
+      className="flex items-center gap-1 self-start rounded-2xl bg-muted px-4 py-3"
+    >
+      {[0, 1, 2].map((dot) => (
+        <span
+          key={dot}
+          className="typing-dot size-2 rounded-full bg-muted-foreground"
+          style={{ animationDelay: `${dot * 160}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
 
 function ToolRow({
   item,
@@ -295,12 +334,7 @@ function Conversation({
               <ToolRow key={item.id} item={item} onDecision={decide} />
             ),
           )}
-          {running && thinking && (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
-              正在思考…
-            </p>
-          )}
+          {isWaitingForReply(items, running, thinking) && <TypingIndicator />}
           <div ref={bottomRef} />
         </div>
       </div>
