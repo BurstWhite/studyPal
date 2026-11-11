@@ -10,6 +10,7 @@ import {
   academicYearOf,
   expandSlot,
   fetchSchoolCalendar,
+  joinAdjacentSlots,
   type SchoolCalendar,
 } from "./schoolCalendar";
 import {
@@ -66,7 +67,7 @@ export function buildClasses(
   calendar: SchoolCalendar,
 ): DatedClass[] {
   const classes = new Map<string, DatedClass>();
-  for (const slot of slots) {
+  for (const slot of joinAdjacentSlots(slots, calendar)) {
     for (const occurrence of expandSlot(slot, calendar)) {
       const sourceId = `${termId}|${slot.name}|${occurrence.date}|${slot.firstPeriod}`;
       classes.set(sourceId, {

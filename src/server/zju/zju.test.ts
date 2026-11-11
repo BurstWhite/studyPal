@@ -13,6 +13,7 @@ import {
 import {
   academicYearOf,
   expandSlot,
+  joinAdjacentSlots,
   parseSchoolCalendar,
 } from "./schoolCalendar";
 import { runSync, storeTodos } from "./sync";
@@ -274,6 +275,73 @@ describe("school calendar", () => {
     expect(all).not.toContain("2026-10-01");
     expect(all).toContain("2027-01-04"); // Thursday 12-31 is made up on 01-04
     expect(all).toHaveLength(15);
+  });
+
+  test("one sitting reported as two records becomes a single class", () => {
+    // Period 6 on its own, then periods 7–8: 13:25–14:10 and 14:15–15:50.
+    const joined = joinAdjacentSlots(
+      [
+        slot({ firstPeriod: 7, periodCount: 2 }),
+        slot({ firstPeriod: 6, periodCount: 1 }),
+      ],
+      calendar,
+    );
+    expect(joined).toEqual([slot({ firstPeriod: 6, periodCount: 3 })]);
+    expect(expandSlot(joined[0]!, calendar)[0]).toMatchObject({
+      startsAt: "2026-09-14T13:25:00+08:00",
+      endsAt: "2026-09-14T15:50:00+08:00",
+    });
+    // Three records in a row join too.
+    expect(
+      joinAdjacentSlots(
+        [6, 7, 8].map((firstPeriod) => slot({ firstPeriod, periodCount: 1 })),
+        calendar,
+      ),
+    ).toEqual([slot({ firstPeriod: 6, periodCount: 3 })]);
+  });
+
+  test("slots are not joined across a long break or when anything differs", () => {
+    const apart = (a: Partial<TimetableSlot>, b: Partial<TimetableSlot>) =>
+      joinAdjacentSlots([slot(a), slot(b)], calendar).length;
+    // Period 5 ends at 12:25 and period 6 starts at 13:25: lunch.
+    expect(
+      apart(
+        { firstPeriod: 3, periodCount: 3 },
+        { firstPeriod: 6, periodCount: 1 },
+      ),
+    ).toBe(2);
+    // Period 10 ends at 17:50 and period 11 starts at 18:50: dinner.
+    expect(
+      apart(
+        { firstPeriod: 9, periodCount: 2 },
+        { firstPeriod: 11, periodCount: 2 },
+      ),
+    ).toBe(2);
+    // Period 2 ends at 09:35 and period 3 starts at 10:00: the long morning break.
+    expect(
+      apart(
+        { firstPeriod: 1, periodCount: 2 },
+        { firstPeriod: 3, periodCount: 2 },
+      ),
+    ).toBe(2);
+    const next = { firstPeriod: 7, periodCount: 2 };
+    const first = { firstPeriod: 6, periodCount: 1 };
+    expect(apart(first, { ...next, name: "另一门课" })).toBe(2);
+    expect(apart(first, { ...next, location: "另一间教室" })).toBe(2);
+    expect(apart(first, { ...next, dayOfWeek: 2 })).toBe(2);
+    expect(apart(first, { ...next, evenWeeks: false })).toBe(2);
+    expect(apart(first, { ...next, secondHalf: true })).toBe(2);
+    // A gap of a whole period is not adjacent.
+    expect(apart(first, { firstPeriod: 8, periodCount: 1 })).toBe(2);
+  });
+
+  test("joining leaves the input untouched", () => {
+    const input = [
+      slot({ firstPeriod: 6, periodCount: 1 }),
+      slot({ firstPeriod: 7, periodCount: 2 }),
+    ];
+    joinAdjacentSlots(input, calendar);
+    expect(input.map((s) => s.periodCount)).toEqual([1, 2]);
   });
 
   test("a slot beyond the known periods yields nothing", () => {
