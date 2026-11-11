@@ -111,3 +111,12 @@ dist
 
 # TernJS port file
 .tern-port
+
+# studyPal local data (dev)
+.studypal-data/
+
+# Temporary files left by `bun build --compile`
+*.bun-build
+
+# macOS
+.DS_Store
