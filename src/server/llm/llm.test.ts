@@ -1261,14 +1261,37 @@ describe("DeepSeek and OpenCode providers", () => {
     const sessions = api.requests.map((request) =>
       request.headers.get("x-opencode-session"),
     );
-    expect(sessions[0]).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    );
+    expect(sessions[0]).toMatch(/^ses_[0-9a-f]{32}$/);
     expect(new Set(sessions.slice(0, 3)).size).toBe(1);
     expect(sessions[3]).not.toBe(sessions[0]);
     expect(api.requests[0]!.headers.get("authorization")).toBe(
       "Bearer sk-test",
     );
+  });
+
+  test("OpenCode Go uses its own address, with the session and client identity it requires", async () => {
+    const db = seededDb();
+    const chatId = await chatWith(db, {
+      kind: "opencode-go",
+      model: "kimi-k3",
+      apiKey: "sk-test",
+    });
+    const api = scripted([openAiSse([{ content: "好" }], "stop")]);
+    await turn(db, chatId, api.fetchImpl, "hi");
+
+    const request = api.requests[0]!;
+    // Not the pay-as-you-go address, which answers a Go key with HTTP 402.
+    expect(request.url).toBe(
+      "https://opencode.ai/inference/go/openai/v1/chat/completions",
+    );
+    expect(request.headers.get("x-opencode-session")).toMatch(
+      /^ses_[0-9a-f]{32}$/,
+    );
+    expect(request.headers.get("user-agent")).toBe("studyPal/0.1.0");
+    expect(request.headers.get("authorization")).toBe("Bearer sk-test");
+    expect(
+      displayMessages("opencode-go", loadMessages(db, chatId)),
+    ).toHaveLength(2);
   });
 
   test("a chat created before session keys existed gets one on first use and keeps it", async () => {

@@ -7,13 +7,14 @@ import { displayOpenAi, OpenAiConversation } from "./openai";
 import type { Conversation, DisplayItem } from "./turn";
 
 export type ProviderKind =
-  "anthropic" | "openai-compatible" | "deepseek" | "opencode";
+  "anthropic" | "openai-compatible" | "deepseek" | "opencode" | "opencode-go";
 
 export const PROVIDER_KINDS: ProviderKind[] = [
   "anthropic",
   "openai-compatible",
   "deepseek",
   "opencode",
+  "opencode-go",
 ];
 
 /**
@@ -24,8 +25,18 @@ export const DEFAULT_BASE_URL: Record<ProviderKind, string> = {
   anthropic: "",
   "openai-compatible": "",
   deepseek: "https://api.deepseek.com",
+  // OpenCode serves pay-as-you-go and the Go subscription from different
+  // addresses. A Go key sent to the pay-as-you-go one is charged against a
+  // credit balance the subscriber does not have, and fails with HTTP 402.
   opencode: "https://opencode.ai/inference/openai/v1",
+  "opencode-go": "https://opencode.ai/inference/go/openai/v1",
 };
+
+/** How studyPal identifies itself; OpenCode asks clients not to use a generic one. */
+const USER_AGENT = "studyPal/0.1.0";
+
+const isOpenCode = (kind: ProviderKind) =>
+  kind === "opencode" || kind === "opencode-go";
 
 const usesAnthropicFormat = (kind: ProviderKind) => kind === "anthropic";
 
@@ -367,9 +378,15 @@ export async function openConversation(
   return new OpenAiConversation(
     {
       ...settings,
-      // OpenCode groups a conversation's requests by this header.
-      ...(provider.kind === "opencode"
-        ? { headers: { "x-opencode-session": sessionKey(db, chat.id) } }
+      // OpenCode routes and caches by a stable per-conversation session id
+      // (the Go plan requires it), written like `ses_…`.
+      ...(isOpenCode(provider.kind)
+        ? {
+            headers: {
+              "User-Agent": USER_AGENT,
+              "x-opencode-session": `ses_${sessionKey(db, chat.id).replaceAll("-", "")}`,
+            },
+          }
         : {}),
     },
     history,
