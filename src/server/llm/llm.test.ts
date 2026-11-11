@@ -127,6 +127,7 @@ describe("tools", () => {
       [
         "create_event",
         "create_study_blocks",
+        "set_reminders",
         "set_study_block_done",
         "delete_study_block",
       ],
@@ -138,6 +139,7 @@ describe("tools", () => {
     expect(call(db, "list_events", day).data.items).toEqual([
       {
         kind: "class",
+        id: 1,
         title: "数据结构",
         start: "2026-11-10T08:00:00+08:00",
         end: "2026-11-10T09:35:00+08:00",
@@ -146,6 +148,7 @@ describe("tools", () => {
       },
       {
         kind: "event",
+        id: 2,
         title: "组会",
         start: "2026-11-10T14:00:00+08:00",
         end: "2026-11-10T15:00:00+08:00",
@@ -160,6 +163,8 @@ describe("tools", () => {
         title: "实验三",
         due: "2026-11-12T23:59:00+08:00",
         status: "open",
+        // The built-in reminders every deadline has.
+        reminders_minutes_before: [2880, 1440],
       },
     ]);
     expect(
@@ -308,6 +313,155 @@ describe("tools", () => {
       source: "manual",
       title: "答疑",
       location: "西2",
+    });
+  });
+
+  test("events and study blocks can be created with reminders", () => {
+    const db = seededDb();
+    db.exec(
+      "INSERT INTO settings (key, value) VALUES ('system_calendar_enabled', 'true')",
+    );
+    const event = call(db, "create_event", {
+      title: "答疑",
+      starts_at: "2026-11-10T16:00:00+08:00",
+      ends_at: "2026-11-10T17:00:00+08:00",
+      reminders_minutes_before: [30, 1440, 30],
+    });
+    // With the system calendar on there is nothing to warn about.
+    expect(event.data).toEqual({ created_event_id: 3 });
+    call(db, "create_study_blocks", {
+      blocks: [
+        {
+          title: "带提醒",
+          starts_at: "2026-11-10T19:00:00+08:00",
+          ends_at: "2026-11-10T20:00:00+08:00",
+          reminders_minutes_before: [10],
+        },
+        {
+          title: "不带",
+          starts_at: "2026-11-10T20:00:00+08:00",
+          ends_at: "2026-11-10T21:00:00+08:00",
+        },
+      ],
+    });
+    const items = call(db, "list_events", day).data.items as any[];
+    // Longest lead first, duplicates dropped.
+    expect(
+      items.find((i) => i.title === "答疑").reminders_minutes_before,
+    ).toEqual([1440, 30]);
+    expect(
+      items.find((i) => i.title === "带提醒").reminders_minutes_before,
+    ).toEqual([10]);
+    expect(items.find((i) => i.title === "不带")).not.toHaveProperty(
+      "reminders_minutes_before",
+    );
+  });
+
+  test("set_reminders adds to the built-in reminders and can be cleared", () => {
+    const db = seededDb();
+    db.exec(
+      "INSERT INTO settings (key, value) VALUES ('system_calendar_enabled', 'true')",
+    );
+    const reminders = () =>
+      call(db, "list_assignments", {}).data.assignments[0]
+        .reminders_minutes_before;
+
+    expect(
+      call(db, "set_reminders", {
+        target: "assignment",
+        id: 1,
+        minutes_before: [120],
+      }),
+    ).toMatchObject({
+      isError: false,
+      changed: true,
+      data: { target: "assignment", id: 1, reminders_minutes_before: [120] },
+    });
+    // The 48 h and 24 h reminders stay; the new one is added.
+    expect(reminders()).toEqual([2880, 1440, 120]);
+    // Setting again replaces only what the user had set.
+    call(db, "set_reminders", {
+      target: "assignment",
+      id: 1,
+      minutes_before: [4320, 60],
+    });
+    expect(reminders()).toEqual([4320, 2880, 1440, 60]);
+    call(db, "set_reminders", {
+      target: "assignment",
+      id: 1,
+      minutes_before: [],
+    });
+    expect(reminders()).toEqual([2880, 1440]);
+
+    // A synced class, by the id list_events reports.
+    call(db, "set_reminders", { target: "event", id: 1, minutes_before: [15] });
+    expect(call(db, "list_events", day).data.items[0]).toMatchObject({
+      kind: "class",
+      reminders_minutes_before: [15],
+    });
+  });
+
+  test("the model is told when reminders cannot sound yet", () => {
+    const db = seededDb();
+    const result = call(db, "set_reminders", {
+      target: "event",
+      id: 2,
+      minutes_before: [30],
+    });
+    expect(result.isError).toBe(false);
+    expect(result.data.note).toContain("系统日历");
+    // Clearing reminders needs no such warning.
+    expect(
+      call(db, "set_reminders", { target: "event", id: 2, minutes_before: [] })
+        .data,
+    ).not.toHaveProperty("note");
+  });
+
+  test("set_reminders rejects bad targets, ids and times", () => {
+    const db = seededDb();
+    db.exec(
+      "INSERT INTO assignments (id, title, status) VALUES (9, '没有截止时间', 'open')",
+    );
+    const fail = (input: object) => call(db, "set_reminders", input);
+    expect(fail({ target: "chat", id: 1, minutes_before: [5] }).data).toContain(
+      "target",
+    );
+    expect(fail({ target: "event", id: 99, minutes_before: [5] }).data).toBe(
+      "日程 99 不存在",
+    );
+    expect(
+      fail({ target: "study_block", id: 1, minutes_before: [5] }).data,
+    ).toBe("学习块 1 不存在");
+    expect(
+      fail({ target: "assignment", id: 9, minutes_before: [5] }).data,
+    ).toContain("没有截止时间");
+    expect(fail({ target: "event", id: 1 }).data).toContain("minutes_before");
+    expect(fail({ target: "event", id: 1, minutes_before: [-5] }).isError).toBe(
+      true,
+    );
+    expect(
+      fail({ target: "event", id: 1, minutes_before: [1.5] }).isError,
+    ).toBe(true);
+    expect(
+      fail({ target: "event", id: 1, minutes_before: [50000] }).data,
+    ).toContain("4 周");
+    expect(
+      fail({ target: "event", id: 1, minutes_before: [1, 2, 3, 4, 5, 6] }).data,
+    ).toContain("最多");
+    expect(fail({ target: "event", id: 1, minutes_before: "30" }).isError).toBe(
+      true,
+    );
+    // A rejected create writes nothing.
+    expect(
+      call(db, "create_event", {
+        title: "x",
+        starts_at: day.from,
+        ends_at: day.to,
+        reminders_minutes_before: [-1],
+      }).isError,
+    ).toBe(true);
+    expect(db.query("SELECT count(*) AS n FROM events").get()).toEqual({
+      n: 2,
     });
   });
 

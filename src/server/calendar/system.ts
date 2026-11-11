@@ -10,14 +10,15 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { config } from "../config";
+import {
+  DEFAULT_ASSIGNMENT_REMINDERS,
+  DEFAULT_EXAM_REMINDERS,
+  effectiveReminders,
+} from "../reminders";
 import { parseRule } from "./recurrence";
 
 const CALENDAR_TITLE = "studyPal";
 
-/** Reminders for a deadline, as minutes before it is due. */
-export const DEADLINE_REMINDERS_MINUTES = [48 * 60, 24 * 60];
-/** Reminders for an exam, as minutes before it starts: a week and a day. */
-export const EXAM_REMINDERS_MINUTES = [7 * 24 * 60, 24 * 60];
 /** How long before the due time a deadline's calendar entry starts. */
 const DEADLINE_ENTRY_MINUTES = 30;
 
@@ -86,7 +87,7 @@ export function buildItems(db: Database): CalendarItem[] {
 
   const events = db
     .query(
-      "SELECT id, source, source_id, title, location, notes, starts_at, ends_at, all_day, rrule FROM events ORDER BY id",
+      "SELECT id, source, source_id, title, location, notes, starts_at, ends_at, all_day, rrule, reminders FROM events ORDER BY id",
     )
     .all() as {
     id: number;
@@ -99,6 +100,7 @@ export function buildItems(db: Database): CalendarItem[] {
     ends_at: string;
     all_day: number;
     rrule: string | null;
+    reminders: string | null;
   }[];
   for (const row of events) {
     const allDay = row.all_day === 1;
@@ -115,7 +117,10 @@ export function buildItems(db: Database): CalendarItem[] {
       location: row.location,
       notes: row.notes,
       url: null,
-      alarms: row.source === "exam" ? EXAM_REMINDERS_MINUTES : [],
+      alarms: effectiveReminders(
+        row.source === "exam" ? DEFAULT_EXAM_REMINDERS : [],
+        row.reminders,
+      ),
       rule: parsed && {
         freq: parsed.freq,
         interval: parsed.interval,
@@ -127,7 +132,7 @@ export function buildItems(db: Database): CalendarItem[] {
 
   const assignments = db
     .query(
-      `SELECT id, course, title, due_at, url FROM assignments
+      `SELECT id, course, title, due_at, url, reminders FROM assignments
        WHERE status = 'open' AND due_at IS NOT NULL ORDER BY id`,
     )
     .all() as {
@@ -136,6 +141,7 @@ export function buildItems(db: Database): CalendarItem[] {
     title: string;
     due_at: string;
     url: string | null;
+    reminders: string | null;
   }[];
   for (const row of assignments) {
     const due = new Date(row.due_at);
@@ -149,22 +155,24 @@ export function buildItems(db: Database): CalendarItem[] {
       notes: row.course,
       url: row.url,
       // Alarms count back from the entry's start, reminders from the due time.
-      alarms: DEADLINE_REMINDERS_MINUTES.map(
-        (minutes) => minutes - DEADLINE_ENTRY_MINUTES,
-      ),
+      alarms: effectiveReminders(
+        DEFAULT_ASSIGNMENT_REMINDERS,
+        row.reminders,
+      ).map((minutes) => minutes - DEADLINE_ENTRY_MINUTES),
       rule: null,
     });
   }
 
   const blocks = db
     .query(
-      "SELECT id, title, starts_at, ends_at FROM study_blocks WHERE done = 0 ORDER BY id",
+      "SELECT id, title, starts_at, ends_at, reminders FROM study_blocks WHERE done = 0 ORDER BY id",
     )
     .all() as {
     id: number;
     title: string;
     starts_at: string;
     ends_at: string;
+    reminders: string | null;
   }[];
   for (const row of blocks) {
     items.push({
@@ -176,7 +184,7 @@ export function buildItems(db: Database): CalendarItem[] {
       location: null,
       notes: null,
       url: null,
-      alarms: [],
+      alarms: effectiveReminders([], row.reminders),
       rule: null,
     });
   }
