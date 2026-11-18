@@ -113,7 +113,7 @@ export function ClaudeBridge() {
         )}
 
         {preview && !bridge?.installed && (
-          <div className="flex flex-col gap-3 rounded-md border p-3 text-sm">
+          <div className="flex flex-col gap-3 rounded-xl border p-3 text-sm">
             <p>
               开启后会做下面三件事。你现有的状态栏会照常显示：新脚本保存一份数据后，会把同样的输入交给原来的命令。
             </p>

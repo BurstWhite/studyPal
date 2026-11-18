@@ -12,8 +12,25 @@
   }
 
   body {
-    @apply m-0 bg-background text-foreground;
+    @apply m-0 bg-background text-foreground antialiased;
   }
+
+  /* Native checkboxes and radios pick up the jade accent. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--primary);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Times, dates and counts: rounded figures that line up in columns. */
+@utility num {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
 }
 
 /* The dots shown while the assistant has not started replying yet. */

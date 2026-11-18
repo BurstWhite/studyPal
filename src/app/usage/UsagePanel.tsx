@@ -29,10 +29,14 @@ function formatReset(iso: string): string {
 /** The fill carries how close the limit is; the track is the same hue, lighter. */
 function severity(percent: number) {
   if (percent >= 90)
-    return { fill: "bg-red-600", track: "bg-red-600/20", note: "即将用完" };
+    return {
+      fill: "bg-destructive",
+      track: "bg-danger-soft",
+      note: "即将用完",
+    };
   if (percent >= 75)
-    return { fill: "bg-amber-500", track: "bg-amber-500/20", note: "用量较高" };
-  return { fill: "bg-chart-2", track: "bg-chart-2/20", note: undefined };
+    return { fill: "bg-warn", track: "bg-warn-soft", note: "用量较高" };
+  return { fill: "bg-primary", track: "bg-muted", note: undefined };
 }
 
 function LimitMeter({
@@ -65,7 +69,7 @@ function LimitMeter({
             </span>
           )}
         </span>
-        <span className="tabular-nums">
+        <span className="num">
           <span className="font-medium">{percent}%</span>
           <span className="ml-2 text-xs text-muted-foreground">
             {formatReset(window.resetsAt)}
@@ -108,7 +112,7 @@ function TokenTable({ tokens }: { tokens: TokenWindows }) {
           <th className="py-1 text-right font-normal">请求数</th>
         </tr>
       </thead>
-      <tbody className="tabular-nums">
+      <tbody className="num">
         {rows.map(([label, totals]) => (
           <tr key={label} className="border-t">
             <td className="py-1.5">{label}</td>
@@ -150,8 +154,8 @@ function ToolCard({
   limitsHint: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 rounded-lg border p-4">
-      <h3 className="text-sm font-medium">{name}</h3>
+    <div className="flex flex-col gap-4 rounded-2xl border bg-card px-5 py-4">
+      <h3 className="text-[15px] font-semibold">{name}</h3>
       {!found ? (
         <p className="text-sm text-muted-foreground">
           最近 7 天在这台电脑上没有找到 {name} 的使用记录。
@@ -189,7 +193,9 @@ export function UsagePanel() {
   const { data, error } = useQuery<UsageReport>("/api/usage");
   return (
     <section>
-      <h2 className="mb-2 text-sm font-medium">AI 工具用量</h2>
+      <h2 className="mb-3 mt-2 text-[17px] font-semibold tracking-tight">
+        AI 工具用量
+      </h2>
       {error && (
         <p role="alert" className="text-sm text-destructive">
           无法读取用量：{error}

@@ -129,7 +129,7 @@ function toRequest(form: FormState): { body: object } | { problem: string } {
 }
 
 const fieldClass =
-  "h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
+  "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 export function EventDialog({
   target,
@@ -228,7 +228,7 @@ export function EventDialog({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="m-auto w-[28rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-background p-0 text-foreground shadow-lg backdrop:bg-black/40"
+      className="m-auto w-[28rem] max-w-[calc(100vw-2rem)] rounded-2xl border bg-card p-0 text-foreground shadow-2xl backdrop:bg-black/30 backdrop:backdrop-blur-[2px]"
     >
       <form onSubmit={submit} className="flex flex-col gap-4 p-6">
         <h2 className="text-lg font-semibold">

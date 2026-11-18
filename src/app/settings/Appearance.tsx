@@ -29,7 +29,7 @@ export function Appearance() {
         <div
           role="radiogroup"
           aria-label="外观"
-          className="inline-flex rounded-lg border p-1"
+          className="inline-flex rounded-xl border bg-muted/50 p-1"
         >
           {OPTIONS.map((option) => (
             <button
@@ -39,9 +39,9 @@ export function Appearance() {
               aria-checked={theme === option.value}
               onClick={() => setTheme(option.value)}
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
+                "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors",
                 theme === option.value
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >

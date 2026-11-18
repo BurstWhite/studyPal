@@ -56,28 +56,41 @@ export function App() {
   const active = useHashRoute();
   const Page = active.page;
 
+  const navLink = (route: Route) => (
+    <a
+      key={route.path}
+      href={`#/${route.path}`}
+      aria-current={route === active ? "page" : undefined}
+      className={cn(
+        "flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[14px] transition-colors",
+        route === active
+          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+          : "text-sidebar-foreground/80 hover:bg-black/[0.04] hover:text-sidebar-foreground dark:hover:bg-white/[0.05]",
+      )}
+    >
+      <route.icon
+        className={cn(
+          "size-[18px]",
+          route === active ? "text-sidebar-primary" : "opacity-70",
+        )}
+        strokeWidth={1.75}
+      />
+      {route.label}
+    </a>
+  );
+
   return (
     <div className="flex h-screen w-screen overflow-hidden">
-      <nav className="flex w-44 shrink-0 flex-col gap-1 border-r bg-sidebar p-3 text-sidebar-foreground">
-        <div className="px-2 pb-3 pt-1 text-lg font-semibold">studyPal</div>
-        {routes.map((route) => (
-          <a
-            key={route.path}
-            href={`#/${route.path}`}
-            aria-current={route === active ? "page" : undefined}
-            className={cn(
-              "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-              route === active
-                ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                : "hover:bg-sidebar-accent/60",
-            )}
-          >
-            <route.icon className="size-4" />
-            {route.label}
-          </a>
-        ))}
+      <nav className="flex w-48 shrink-0 flex-col gap-0.5 border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground">
+        <div className="px-2.5 pb-5 pt-2 text-[19px] font-semibold tracking-tight">
+          study<span className="text-sidebar-primary">Pal</span>
+        </div>
+        {routes.filter((route) => route.path !== "settings").map(navLink)}
+        <div className="flex-1" />
+        <div className="mb-1 border-t border-sidebar-border" />
+        {navLink(routes.find((route) => route.path === "settings")!)}
       </nav>
-      <main className="min-w-0 flex-1 overflow-y-auto p-6">
+      <main className="min-w-0 flex-1 overflow-y-auto px-8 py-7">
         <Page />
       </main>
     </div>

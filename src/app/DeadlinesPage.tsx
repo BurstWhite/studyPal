@@ -1,13 +1,19 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  CalendarClock,
   ChevronDown,
   ChevronRight,
+  Clock,
   ExternalLink,
   Plus,
+  Search,
   Sparkles,
+  TriangleAlert,
+  X,
+  type LucideIcon,
 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import type {
   Assignment,
   AssignmentStatus,
@@ -16,7 +22,7 @@ import { cn } from "../lib/utils";
 import { api, useQuery } from "./api";
 import { fromDateTimeInput } from "./calendar/dates";
 import { planPrompt, queuePrompt } from "./chat/pendingPrompt";
-import { PageHeader } from "./PageHeader";
+import { Chip, EmptyNote, PageHeader } from "./PageHeader";
 
 const HOUR_MS = 3_600_000;
 
@@ -36,6 +42,16 @@ export function describeRemaining(
   if (hours < 48)
     return { text: `还剩 ${Math.round(hours)} 小时`, urgent: hours <= 24 };
   return { text: `还剩 ${Math.floor(hours / 24)} 天`, urgent: false };
+}
+
+/** Pill color for a deadline: red when urgent, amber within a week. */
+export function remainingTone(
+  dueAt: string,
+  now: Date,
+): "danger" | "warn" | "neutral" {
+  if (describeRemaining(dueAt, now).urgent) return "danger";
+  const days = (new Date(dueAt).getTime() - now.getTime()) / (24 * HOUR_MS);
+  return days <= 7 ? "warn" : "neutral";
 }
 
 function formatDue(dueAt: string): string {
@@ -78,44 +94,44 @@ function Row({
   };
 
   return (
-    <li className="px-4 py-3">
-      <div className="flex items-center gap-3">
+    <li className="py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <input
           type="checkbox"
           aria-label={`${item.title} 已完成`}
           checked={item.status === "done"}
           onChange={(event) => onStatus(event.target.checked ? "done" : "open")}
-          className="size-4"
+          className="size-[18px] shrink-0"
         />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-48 flex-1">
           {hasDetails ? (
             <button
               type="button"
               aria-expanded={expanded}
               onClick={() => setExpanded(!expanded)}
               className={cn(
-                "flex max-w-full items-center gap-1 text-left text-sm font-medium",
+                "flex max-w-full items-center gap-1 text-left text-[15px] font-medium hover:text-primary",
                 !open && "text-muted-foreground line-through",
               )}
             >
-              {expanded ? (
-                <ChevronDown className="size-3.5 shrink-0" />
-              ) : (
-                <ChevronRight className="size-3.5 shrink-0" />
-              )}
               <span className="truncate">{item.title}</span>
+              {expanded ? (
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              )}
             </button>
           ) : (
             <div
               className={cn(
-                "truncate text-sm font-medium",
+                "truncate text-[15px] font-medium",
                 !open && "text-muted-foreground line-through",
               )}
             >
               {item.title}
             </div>
           )}
-          <div className="truncate text-xs text-muted-foreground">
+          <div className="num mt-0.5 truncate text-xs text-muted-foreground">
             {[
               item.course,
               item.dueAt ? `${formatDue(item.dueAt)} 截止` : "没有截止时间",
@@ -124,51 +140,65 @@ function Row({
               .join(" · ")}
           </div>
         </div>
-        {remaining && (
-          <span
-            className={cn(
-              "shrink-0 text-sm tabular-nums",
-              remaining.urgent && "font-medium text-destructive",
-            )}
-          >
-            {remaining.text}
-          </span>
-        )}
-        {open && (
-          <Button
-            variant="ghost"
-            size="sm"
-            title="让助手把这项作业拆成学习块，排进空档"
-            onClick={() => queuePrompt(planPrompt(item))}
-          >
-            <Sparkles />
-            生成计划
-          </Button>
-        )}
-        {item.source === "manual" ? (
-          <Button variant="ghost" size="sm" onClick={onDelete}>
-            删除
-          </Button>
-        ) : item.status === "dismissed" ? (
-          <Button variant="ghost" size="sm" onClick={() => onStatus("open")}>
-            恢复
-          </Button>
-        ) : (
-          open && (
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {remaining && (
+            <Chip
+              tone={remainingTone(item.dueAt!, new Date())}
+              className="mr-2"
+            >
+              {remaining.text}
+            </Chip>
+          )}
+          {item.status === "dismissed" && <Chip className="mr-2">已忽略</Chip>}
+          {open && (
+            <Button
+              // Only deadlines within a week get the outlined button.
+              variant={
+                item.dueAt &&
+                remainingTone(item.dueAt, new Date()) !== "neutral"
+                  ? "accent"
+                  : "ghost"
+              }
+              size="sm"
+              className="text-primary"
+              title="让助手把这项作业拆成学习块，排进空档"
+              onClick={() => queuePrompt(planPrompt(item))}
+            >
+              <Sparkles />
+              生成计划
+            </Button>
+          )}
+          {item.source === "manual" ? (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onStatus("dismissed")}
+              className="text-muted-foreground"
+              onClick={onDelete}
             >
-              忽略
+              删除
             </Button>
-          )
-        )}
+          ) : item.status === "dismissed" ? (
+            <Button variant="ghost" size="sm" onClick={() => onStatus("open")}>
+              恢复
+            </Button>
+          ) : (
+            open && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                onClick={() => onStatus("dismissed")}
+              >
+                忽略
+              </Button>
+            )
+          )}
+        </div>
       </div>
       {expanded && (
-        <div className="ml-7 mt-2 flex flex-col gap-2 border-l-2 pl-3 text-sm">
+        <div className="ml-[30px] mt-3 flex flex-col gap-2 rounded-xl bg-muted/60 px-4 py-3 text-sm">
           {item.description ? (
-            <p className="whitespace-pre-wrap text-muted-foreground">
+            <p className="whitespace-pre-wrap leading-relaxed text-muted-foreground">
               {item.description}
             </p>
           ) : (
@@ -202,7 +232,13 @@ function Row({
   );
 }
 
-function AddForm({ onAdded }: { onAdded: () => void }) {
+function AddForm({
+  onAdded,
+  onCancel,
+}: {
+  onAdded: () => void;
+  onCancel: () => void;
+}) {
   const [title, setTitle] = useState("");
   const [course, setCourse] = useState("");
   const [due, setDue] = useState("");
@@ -236,12 +272,13 @@ function AddForm({ onAdded }: { onAdded: () => void }) {
   return (
     <form
       onSubmit={(event) => void submit(event)}
-      className="mb-4 flex flex-col gap-2"
+      className="mb-5 flex flex-col gap-2 rounded-2xl border bg-card p-4"
     >
       <div className="flex flex-wrap items-center gap-2">
         <Input
           aria-label="作业标题"
-          placeholder="手动添加一项作业"
+          placeholder="作业标题"
+          autoFocus
           className="min-w-48 flex-1"
           value={title}
           onChange={(event) => setTitle(event.target.value)}
@@ -260,9 +297,15 @@ function AddForm({ onAdded }: { onAdded: () => void }) {
           value={due}
           onChange={(event) => setDue(event.target.value)}
         />
-        <Button type="submit">
-          <Plus />
-          添加
+        <Button type="submit">添加</Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="取消添加"
+          onClick={onCancel}
+        >
+          <X />
         </Button>
       </div>
       {problem && (
@@ -274,10 +317,45 @@ function AddForm({ onAdded }: { onAdded: () => void }) {
   );
 }
 
+type Filter = "open" | "week" | "done" | "dismissed";
+
+const WEEK_MS = 7 * 24 * HOUR_MS;
+
+/** A titled group of rows inside the list. */
+function Group({
+  icon: Icon,
+  title,
+  tone,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  tone?: "danger";
+  children: ReactNode;
+}) {
+  return (
+    <section>
+      <h2
+        className={cn(
+          "flex items-center gap-2 pb-1 text-[15px] font-semibold",
+          tone === "danger" && "text-destructive",
+        )}
+      >
+        <Icon className="size-4" strokeWidth={1.75} />
+        {title}
+      </h2>
+      <ul className="divide-y border-b">{children}</ul>
+    </section>
+  );
+}
+
 export function DeadlinesPage() {
   const { data, error, loading, reload } =
     useQuery<Assignment[]>("/api/assignments");
   const [problem, setProblem] = useState<string>();
+  const [filter, setFilter] = useState<Filter>("open");
+  const [query, setQuery] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const run = async (action: () => Promise<unknown>) => {
     setProblem(undefined);
@@ -298,25 +376,144 @@ export function DeadlinesPage() {
   const remove = (item: Assignment) =>
     run(() => api(`/api/assignments/${item.id}`, { method: "DELETE" }));
 
-  const open = data?.filter((item) => item.status === "open") ?? [];
-  const closed = data?.filter((item) => item.status !== "open") ?? [];
+  const now = Date.now();
+  const needle = query.trim().toLowerCase();
+  const matches = (item: Assignment) =>
+    !needle ||
+    item.title.toLowerCase().includes(needle) ||
+    (item.course ?? "").toLowerCase().includes(needle);
+  const all = data ?? [];
+  const due = (item: Assignment) =>
+    item.dueAt === null ? Infinity : new Date(item.dueAt).getTime();
+  const open = all.filter((item) => item.status === "open");
+  const thisWeek = open.filter((item) => due(item) - now <= WEEK_MS);
+  const done = all.filter((item) => item.status === "done");
+  const dismissed = all.filter((item) => item.status === "dismissed");
+
+  const tabs: { value: Filter; label: string; count: number }[] = [
+    { value: "open", label: "待完成", count: open.length },
+    { value: "week", label: "7 天内到期", count: thisWeek.length },
+    { value: "done", label: "已完成", count: done.length },
+    ...(dismissed.length > 0
+      ? [
+          {
+            value: "dismissed" as const,
+            label: "已忽略",
+            count: dismissed.length,
+          },
+        ]
+      : []),
+  ];
+
   const rows = (items: Assignment[]) =>
-    items.map((item) => (
-      <Row
-        key={item.id}
-        item={item}
-        onStatus={(status) => void setStatus(item, status)}
-        onDelete={() => void remove(item)}
-      />
-    ));
+    items
+      .filter(matches)
+      .map((item) => (
+        <Row
+          key={item.id}
+          item={item}
+          onStatus={(status) => void setStatus(item, status)}
+          onDelete={() => void remove(item)}
+        />
+      ));
+
+  // The open list is split by how soon each item is due.
+  const overdue = open.filter((item) => due(item) <= now);
+  const soon = open.filter(
+    (item) => due(item) > now && due(item) - now <= WEEK_MS,
+  );
+  const later = open.filter(
+    (item) => due(item) - now > WEEK_MS && item.dueAt !== null,
+  );
+  const undated = open.filter((item) => item.dueAt === null);
+  const groups: {
+    icon: LucideIcon;
+    title: string;
+    items: Assignment[];
+    tone?: "danger";
+  }[] =
+    filter === "open"
+      ? [
+          {
+            icon: TriangleAlert,
+            title: "已截止",
+            items: overdue,
+            tone: "danger",
+          },
+          { icon: CalendarClock, title: "7 天内到期", items: soon },
+          { icon: Clock, title: "之后", items: later },
+          { icon: Clock, title: "没有截止时间", items: undated },
+        ]
+      : [
+          {
+            icon:
+              filter === "week" ? CalendarClock : filter === "done" ? Clock : X,
+            title: tabs.find((tab) => tab.value === filter)!.label,
+            items:
+              filter === "week"
+                ? thisWeek
+                : filter === "done"
+                  ? done
+                  : dismissed,
+          },
+        ];
+  const visible = groups
+    .map((group) => ({ ...group, rows: rows(group.items) }))
+    .filter((group) => group.rows.length > 0);
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl">
       <PageHeader
         title="作业"
         description="学在浙大的待办会自动同步。在「设置」里开启系统日历后，截止前 48 小时和 24 小时各提醒一次。"
+        actions={
+          !adding && (
+            <Button onClick={() => setAdding(true)}>
+              <Plus />
+              添加作业
+            </Button>
+          )
+        }
       />
-      <AddForm onAdded={reload} />
+      {adding && <AddForm onAdded={reload} onCancel={() => setAdding(false)} />}
+
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        <div
+          role="tablist"
+          aria-label="筛选作业"
+          className="flex flex-wrap gap-1.5"
+        >
+          {tabs.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              role="tab"
+              aria-selected={filter === tab.value}
+              onClick={() => setFilter(tab.value)}
+              className={cn(
+                "h-8 whitespace-nowrap rounded-lg px-3 text-sm transition-colors",
+                filter === tab.value
+                  ? "bg-primary font-medium text-primary-foreground"
+                  : "border bg-card text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {tab.label}
+              <span className="num ml-1.5 opacity-80">{tab.count}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex-1" />
+        <label className="relative w-full sm:w-60">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            aria-label="搜索作业或课程"
+            placeholder="搜索作业或课程"
+            className="h-8 pl-9"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+      </div>
 
       {(error ?? problem) && (
         <p role="alert" className="mb-3 text-sm text-destructive">
@@ -327,23 +524,29 @@ export function DeadlinesPage() {
         <p className="text-sm text-muted-foreground">正在读取…</p>
       )}
 
-      {data && open.length === 0 && (
-        <div className="rounded-lg border border-dashed p-8 text-sm text-muted-foreground">
-          没有待完成的作业。在「设置」里登录浙大账号后会自动同步，也可以在上面手动添加。
-        </div>
+      {data && visible.length === 0 && (
+        <EmptyNote>
+          {needle
+            ? `没有和「${query.trim()}」匹配的作业。`
+            : filter === "open"
+              ? "没有待完成的作业。在「设置」里登录浙大账号后会自动同步，也可以点「添加作业」手动添加。"
+              : filter === "week"
+                ? "7 天内没有到期的作业。"
+                : "这里还是空的。"}
+        </EmptyNote>
       )}
-      {open.length > 0 && (
-        <ul className="divide-y rounded-lg border">{rows(open)}</ul>
-      )}
-
-      {closed.length > 0 && (
-        <details className="mt-6">
-          <summary className="cursor-pointer text-sm text-muted-foreground">
-            已完成或已忽略（{closed.length}）
-          </summary>
-          <ul className="mt-2 divide-y rounded-lg border">{rows(closed)}</ul>
-        </details>
-      )}
+      <div className="flex flex-col gap-6">
+        {visible.map((group) => (
+          <Group
+            key={group.title}
+            icon={group.icon}
+            title={`${group.title}（${group.rows.length}）`}
+            tone={group.tone}
+          >
+            {group.rows}
+          </Group>
+        ))}
+      </div>
     </div>
   );
 }
