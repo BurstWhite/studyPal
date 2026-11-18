@@ -1,9 +1,16 @@
 import { Button } from "@/components/ui/button";
-import { Sparkles } from "lucide-react";
+import {
+  CalendarDays,
+  Clock,
+  FileText,
+  GraduationCap,
+  MapPin,
+  Sparkles,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { CalendarEntry } from "../server/calendar/store";
 import type { Assignment } from "../server/routes/assignments";
-import type { StudyBlock } from "../server/routes/study";
+import type { Progress, StudyBlock } from "../server/routes/study";
 import { cn } from "../lib/utils";
 import { api, useQuery } from "./api";
 import {
@@ -13,8 +20,8 @@ import {
   weekdayLabel,
 } from "./calendar/dates";
 import { planPrompt, queuePrompt } from "./chat/pendingPrompt";
-import { describeRemaining } from "./DeadlinesPage";
-import { PageHeader } from "./PageHeader";
+import { describeRemaining, remainingTone } from "./DeadlinesPage";
+import { Chip, EmptyNote, PageHeader, Panel, Ring } from "./PageHeader";
 
 const HOUR_MS = 3_600_000;
 /** Assignments due within this long are listed. */
@@ -35,41 +42,23 @@ function sourceLabel(source: string): string {
   return source === "manual" ? "日程" : "课程";
 }
 
-/** "还有 25 分钟" / "还有 2 小时 10 分钟". */
+/** "25 分钟后" / "2 小时 10 分钟后". */
 function untilText(target: Date, now: Date): string {
   const minutes = Math.max(
     0,
     Math.round((target.getTime() - now.getTime()) / 60_000),
   );
-  if (minutes < 60) return `还有 ${minutes} 分钟`;
-  return `还有 ${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
+  if (minutes < 60) return `${minutes} 分钟后`;
+  const rest = minutes % 60;
+  return `${Math.floor(minutes / 60)} 小时${rest ? ` ${rest} 分钟` : ""}后`;
 }
+
+/** The prompt behind the assistant panel's button. */
+const EVENING_PROMPT =
+  "看看我今天剩下的时间和还没完成的作业，帮我把今晚的空档安排成学习块，避开已有的课程和日程。";
 
 function formatDay(date: Date): string {
   return `${date.getMonth() + 1} 月 ${date.getDate()} 日 ${weekdayLabel(date)}`;
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section>
-      <h2 className="mb-2 text-sm font-medium">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-      {children}
-    </p>
-  );
 }
 
 export function TodayPage() {
@@ -94,6 +83,7 @@ export function TodayPage() {
     `/api/study-blocks?${range(dayStart, dayEnd)}`,
   );
   const assignments = useQuery<Assignment[]>("/api/assignments");
+  const progress = useQuery<Progress>("/api/progress");
   const [problem, setProblem] = useState<string>();
 
   const error =
@@ -142,13 +132,33 @@ export function TodayPage() {
       setProblem(reason instanceof Error ? reason.message : String(reason));
     }
     blocks.reload();
+    progress.reload();
   };
 
   const title = (item: Item) =>
     item.kind === "event" ? item.entry.title : item.block.title;
 
+  const meta = (item: Item) =>
+    item.kind === "block"
+      ? ["学习块", item.block.course, item.block.assignmentTitle]
+          .filter(Boolean)
+          .join(" · ")
+      : [sourceLabel(item.entry.source), item.entry.location]
+          .filter(Boolean)
+          .join(" · ");
+  const location = (item: Item) =>
+    item.kind === "event" ? item.entry.location : item.block.course;
+
+  /** The featured item: what is on now, otherwise what comes next. */
+  const featured = current ?? next;
+  const elapsed = current
+    ? (now.getTime() - current.start.getTime()) /
+      (current.end.getTime() - current.start.getTime())
+    : 0;
+  const week = progress.data?.week;
+
   return (
-    <div className="flex max-w-3xl flex-col gap-6">
+    <div className="flex max-w-6xl flex-col gap-5">
       <PageHeader title="今天" description={formatDay(now)} />
 
       {error && (
@@ -158,197 +168,289 @@ export function TodayPage() {
       )}
 
       {loaded && (
-        <div className="rounded-lg border p-4">
-          {current ? (
-            <>
-              <div className="text-sm text-muted-foreground">正在进行</div>
-              <div className="mt-1 text-xl font-semibold">{title(current)}</div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                到 {formatTime(current.end)} 结束
-                {current.kind === "event" && current.entry.location
-                  ? ` · ${current.entry.location}`
-                  : ""}
-                {next
-                  ? ` · 之后是 ${formatTime(next.start)} 的${title(next)}`
-                  : ""}
-              </div>
-            </>
-          ) : next ? (
-            <>
-              <div className="text-sm text-muted-foreground">
-                接下来 · {untilText(next.start, now)}
-              </div>
-              <div className="mt-1 text-xl font-semibold">{title(next)}</div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                {formatTime(next.start)}–{formatTime(next.end)}
-                {next.kind === "event" && next.entry.location
-                  ? ` · ${next.entry.location}`
-                  : ""}
-              </div>
-            </>
-          ) : (
-            <div className="text-sm text-muted-foreground">
-              {items.length === 0 ? "今天没有安排。" : "今天的安排都结束了。"}
-            </div>
-          )}
-        </div>
-      )}
-
-      <Section title="今天的安排">
-        {allDay.length > 0 && (
-          <p className="mb-2 text-sm text-muted-foreground">
-            全天：{allDay.map((entry) => entry.title).join("、")}
-          </p>
-        )}
-        {loaded && items.length === 0 ? (
-          <Empty>今天没有课程、日程或学习块。</Empty>
-        ) : (
-          <ul className="divide-y rounded-lg border">
-            {items.map((item) => {
-              const past = item.end <= now;
-              const done = item.kind === "block" && item.block.done;
-              return (
-                <li
-                  key={
-                    item.kind === "event"
-                      ? `e${item.entry.id}-${item.entry.start}`
-                      : `b${item.block.id}`
-                  }
-                  className={cn(
-                    "flex items-center gap-3 px-4 py-2.5",
-                    past && !done && "opacity-60",
-                  )}
-                >
-                  <span className="w-24 shrink-0 text-sm tabular-nums text-muted-foreground">
-                    {formatTime(item.start)}–{formatTime(item.end)}
+        <section className="relative overflow-hidden rounded-3xl bg-secondary px-7 py-6 text-secondary-foreground">
+          {featured ? (
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div className="min-w-0">
+                <div className="num text-sm font-medium text-primary">
+                  {current
+                    ? `正在进行 · 到 ${formatTime(current.end)} 结束`
+                    : `接下来 · ${untilText(featured.start, now)}`}
+                </div>
+                <div className="mt-1.5 truncate text-[28px] font-semibold leading-tight tracking-tight text-foreground">
+                  {title(featured)}
+                </div>
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-foreground/70">
+                  <span className="num inline-flex items-center gap-1.5">
+                    <Clock className="size-4 opacity-70" />
+                    {formatTime(featured.start)}–{formatTime(featured.end)}
                   </span>
-                  {item.kind === "block" ? (
-                    <input
-                      type="checkbox"
-                      aria-label={`${item.block.title} 已完成`}
-                      checked={item.block.done}
-                      onChange={() => void toggleBlock(item.block)}
-                      className="size-4 shrink-0"
-                    />
-                  ) : (
-                    // Keeps titles aligned with the rows that have a checkbox.
-                    <span className="size-4 shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div
-                      className={cn(
-                        "truncate text-sm font-medium",
-                        done && "text-muted-foreground line-through",
-                      )}
-                    >
-                      {title(item)}
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {item.kind === "block"
-                        ? [
-                            "学习块",
-                            item.block.course,
-                            item.block.assignmentTitle,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")
-                        : [sourceLabel(item.entry.source), item.entry.location]
-                            .filter(Boolean)
-                            .join(" · ")}
-                    </div>
-                  </div>
-                  {item === current && (
-                    <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-xs">
-                      进行中
+                  {location(featured) && (
+                    <span className="inline-flex items-center gap-1.5">
+                      <MapPin className="size-4 opacity-70" />
+                      {location(featured)}
                     </span>
                   )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Section>
-
-      <Section title="48 小时内到期的作业">
-        {assignments.data && dueSoon.length === 0 ? (
-          <Empty>48 小时内没有到期的作业。</Empty>
-        ) : (
-          <ul className="divide-y rounded-lg border">
-            {dueSoon.map((item) => {
-              const remaining = describeRemaining(item.dueAt!, now);
-              return (
-                <li
-                  key={item.id}
-                  className="flex items-center gap-3 px-4 py-2.5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">
-                      {item.title}
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {item.course ?? "未归类"}
-                    </div>
-                  </div>
-                  <span
-                    className={cn(
-                      "shrink-0 text-sm tabular-nums",
-                      remaining.urgent && "font-medium text-destructive",
-                    )}
-                  >
-                    {remaining.text}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => queuePrompt(planPrompt(item))}
-                  >
-                    <Sparkles />
-                    生成计划
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Section>
-
-      {exams.length > 0 && (
-        <Section title={`未来 ${EXAM_LOOKAHEAD_DAYS} 天的考试`}>
-          <ul className="divide-y rounded-lg border">
-            {exams.map((exam) => {
-              const start = new Date(exam.start);
-              const days = Math.round(
-                (startOfDay(start).getTime() - dayStart.getTime()) /
-                  (24 * HOUR_MS),
-              );
-              return (
-                <li
-                  key={`${exam.id}-${exam.start}`}
-                  className="flex items-center gap-3 px-4 py-2.5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">
-                      {exam.title}
-                    </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {[
-                        `${formatDay(start)} ${formatTime(start)}–${formatTime(new Date(exam.end))}`,
-                        exam.location,
-                        exam.notes,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </div>
-                  </div>
-                  <span className="shrink-0 text-sm tabular-nums">
-                    {days === 0 ? "今天" : days === 1 ? "明天" : `${days} 天后`}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </Section>
+                  {current && next && (
+                    <span className="num">
+                      之后是 {formatTime(next.start)} 的{title(next)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Button variant="accent" asChild>
+                <a href="#/calendar">
+                  <CalendarDays />
+                  在日程中查看
+                </a>
+              </Button>
+            </div>
+          ) : (
+            <div className="text-[17px] font-medium text-foreground/80">
+              {items.length === 0
+                ? "今天没有安排，可以自由支配。"
+                : "今天的安排都结束了。"}
+            </div>
+          )}
+          {current && (
+            // How far through the current class or block we are.
+            <div
+              aria-hidden
+              className="absolute inset-x-0 bottom-0 h-1 bg-primary/15"
+            >
+              <div
+                className="h-full bg-primary"
+                style={{ width: `${Math.min(1, elapsed) * 100}%` }}
+              />
+            </div>
+          )}
+        </section>
       )}
+
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="flex min-w-0 flex-col gap-5">
+          <Panel title="今天的安排">
+            {allDay.length > 0 && (
+              <p className="mb-2 text-sm text-muted-foreground">
+                全天：{allDay.map((entry) => entry.title).join("、")}
+              </p>
+            )}
+            {loaded && items.length === 0 ? (
+              <EmptyNote>今天没有课程、日程或学习块。</EmptyNote>
+            ) : (
+              <ol className="relative">
+                {/* The timeline's spine, behind the dots. */}
+                {items.length > 1 && (
+                  <span
+                    aria-hidden
+                    className="absolute bottom-7 left-[19px] top-7 w-px bg-border"
+                  />
+                )}
+                {items.map((item) => {
+                  const past = item.end <= now;
+                  const done = item.kind === "block" && item.block.done;
+                  const isCurrent = item === current;
+                  // The item the banner above is about stands out here too.
+                  const isFeatured = item === featured;
+                  return (
+                    <li
+                      key={
+                        item.kind === "event"
+                          ? `e${item.entry.id}-${item.entry.start}`
+                          : `b${item.block.id}`
+                      }
+                      className={cn(
+                        "relative flex items-center gap-3 rounded-xl px-3 py-2.5",
+                        isFeatured && "bg-secondary",
+                        past && !done && !isCurrent && "opacity-55",
+                      )}
+                    >
+                      <span className="relative z-10 grid size-4 shrink-0 place-items-center">
+                        {item.kind === "block" ? (
+                          <input
+                            type="checkbox"
+                            aria-label={`${item.block.title} 已完成`}
+                            checked={item.block.done}
+                            onChange={() => void toggleBlock(item.block)}
+                            className="size-4"
+                          />
+                        ) : (
+                          <span
+                            className={cn(
+                              "size-2.5 rounded-full border-2",
+                              isFeatured
+                                ? "border-primary bg-primary"
+                                : "border-muted-foreground/50 bg-card",
+                            )}
+                          />
+                        )}
+                      </span>
+                      <span
+                        className={cn(
+                          "num w-[6.5rem] shrink-0 text-sm",
+                          isFeatured
+                            ? "font-semibold text-primary"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        {formatTime(item.start)}–{formatTime(item.end)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className={cn(
+                            "truncate text-[14px] font-medium",
+                            done && "text-muted-foreground line-through",
+                          )}
+                        >
+                          {title(item)}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {meta(item)}
+                        </div>
+                      </div>
+                      {isCurrent && <Chip tone="jade">进行中</Chip>}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </Panel>
+
+          <Panel title="48 小时内到期">
+            {assignments.data && dueSoon.length === 0 ? (
+              <EmptyNote>48 小时内没有到期的作业。</EmptyNote>
+            ) : (
+              <ul className="-mx-1 divide-y">
+                {dueSoon.map((item) => {
+                  const remaining = describeRemaining(item.dueAt!, now);
+                  return (
+                    <li
+                      key={item.id}
+                      className="flex items-center gap-3 px-1 py-3"
+                    >
+                      <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-secondary text-primary">
+                        <FileText className="size-5" strokeWidth={1.75} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[14px] font-medium">
+                          {item.title}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {item.course ?? "未归类"}
+                        </div>
+                      </div>
+                      <Chip tone={remainingTone(item.dueAt!, now)}>
+                        {remaining.text}
+                      </Chip>
+                      <Button
+                        variant="accent"
+                        size="sm"
+                        onClick={() => queuePrompt(planPrompt(item))}
+                      >
+                        <Sparkles />
+                        生成计划
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Panel>
+        </div>
+
+        <div className="flex flex-col gap-5">
+          <Panel
+            title="本周学习"
+            action={
+              <a
+                href="#/progress"
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                查看进度
+              </a>
+            }
+          >
+            <div className="flex flex-col items-center gap-3 pb-1 pt-1">
+              <Ring
+                done={week?.blocksDone ?? 0}
+                total={week?.blocks ?? 0}
+                label="本周学习块"
+              >
+                <div className="num text-[34px] font-semibold leading-none tracking-tight">
+                  {week ? `${week.blocksDone}/${week.blocks}` : "–"}
+                </div>
+                <div className="mt-1.5 text-xs text-muted-foreground">
+                  学习块已完成
+                </div>
+              </Ring>
+              {week && week.blocks === 0 && (
+                <p className="text-center text-xs text-muted-foreground">
+                  本周还没有安排学习块。
+                </p>
+              )}
+            </div>
+          </Panel>
+
+          {exams.length > 0 && (
+            <Panel
+              title={`${EXAM_LOOKAHEAD_DAYS} 天内的考试`}
+              icon={<GraduationCap className="size-4 text-exam" />}
+            >
+              <ul className="flex flex-col gap-3">
+                {exams.map((exam) => {
+                  const start = new Date(exam.start);
+                  const days = Math.round(
+                    (startOfDay(start).getTime() - dayStart.getTime()) /
+                      (24 * HOUR_MS),
+                  );
+                  return (
+                    <li
+                      key={`${exam.id}-${exam.start}`}
+                      className="flex items-start gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[14px] font-medium">
+                          {exam.title}
+                        </div>
+                        <div className="num truncate text-xs text-muted-foreground">
+                          {[
+                            `${start.getMonth() + 1}/${start.getDate()} ${formatTime(start)}`,
+                            exam.location,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                      </div>
+                      <Chip tone={days <= 3 ? "danger" : "warn"}>
+                        {days === 0
+                          ? "今天"
+                          : days === 1
+                            ? "明天"
+                            : `${days} 天后`}
+                      </Chip>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Panel>
+          )}
+
+          <Panel
+            title="让助手安排"
+            icon={<Sparkles className="size-4 text-primary" />}
+          >
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              助手会看你今天剩下的课程和没完成的作业，把今晚的空档排成学习块，等你确认后再写进日程。
+            </p>
+            <Button
+              className="mt-4 w-full"
+              onClick={() => queuePrompt(EVENING_PROMPT)}
+            >
+              帮我安排今晚
+            </Button>
+          </Panel>
+        </div>
+      </div>
     </div>
   );
 }

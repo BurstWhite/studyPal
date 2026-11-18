@@ -189,7 +189,7 @@ function ZjuAccount() {
                 </Button>
               </div>
             </div>
-            <div className="flex flex-col gap-1.5 rounded-md border p-3">
+            <div className="flex flex-col gap-1.5 rounded-xl border p-3">
               <SyncLine
                 label="课表"
                 unit="节课"
@@ -218,7 +218,7 @@ function ZjuAccount() {
               event.preventDefault();
               void sync(captcha);
             }}
-            className="flex flex-col gap-2 rounded-md border p-3"
+            className="flex flex-col gap-2 rounded-xl border p-3"
           >
             <Label htmlFor="zju-captcha">
               教务网要求输入验证码才能查询课表
@@ -352,7 +352,7 @@ function SystemCalendar() {
         )}
         {data?.hasCalendar &&
           (confirmingClear ? (
-            <div className="flex flex-col gap-2 rounded-md border border-destructive/40 p-3 text-sm">
+            <div className="flex flex-col gap-2 rounded-xl border border-destructive/40 p-3 text-sm">
               <p>
                 会从系统日历里删除整个「studyPal」日历和其中的所有条目及提醒，并关闭写入。studyPal
                 里的课表、日程和作业不受影响，之后重新开启会全部重新写入。

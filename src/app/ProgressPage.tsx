@@ -1,6 +1,7 @@
 import type { Progress, ProgressAssignment } from "../server/routes/study";
+import { cn } from "../lib/utils";
 import { useQuery } from "./api";
-import { PageHeader } from "./PageHeader";
+import { Chip, EmptyNote, PageHeader, Panel, Ring } from "./PageHeader";
 import { UsagePanel } from "./usage/UsagePanel";
 
 /** Whole hours and minutes, e.g. `3 小时 30 分`. */
@@ -45,31 +46,40 @@ function Meter({
       aria-valuenow={done}
       aria-valuetext={`${done} / ${total}`}
       title={`${label}：${done} / ${total}`}
-      className="h-2 w-full overflow-hidden rounded-full bg-chart-1/20"
+      className="h-2 w-full overflow-hidden rounded-full bg-muted"
     >
       <div
-        className="h-full rounded-full bg-chart-1"
+        className="h-full rounded-full bg-primary"
         style={{ width: `${ratio * 100}%` }}
       />
     </div>
   );
 }
 
-function Tile({
+function Stat({
   label,
   value,
   detail,
+  tone,
 }: {
   label: string;
   value: string;
   detail?: string;
+  tone?: "danger";
 }) {
   return (
-    <div className="rounded-lg border p-4">
+    <div className="py-3 first:pt-0 last:pb-0">
       <div className="text-sm text-muted-foreground">{label}</div>
-      <div className="mt-1 text-3xl font-semibold tabular-nums">{value}</div>
+      <div
+        className={cn(
+          "num mt-0.5 text-[26px] font-semibold leading-tight tracking-tight",
+          tone === "danger" && "text-destructive",
+        )}
+      >
+        {value}
+      </div>
       {detail && (
-        <div className="mt-1 text-xs text-muted-foreground">{detail}</div>
+        <div className="num text-xs text-muted-foreground">{detail}</div>
       )}
     </div>
   );
@@ -79,25 +89,31 @@ function AssignmentList({
   title,
   empty,
   items,
+  tone,
 }: {
   title: string;
   empty: string;
   items: ProgressAssignment[];
+  tone?: "danger";
 }) {
   return (
-    <section>
-      <h2 className="mb-2 text-sm font-medium">{title}</h2>
+    <Panel
+      title={
+        <span className={cn(tone === "danger" && "text-destructive")}>
+          {title}
+        </span>
+      }
+      action={items.length > 0 && <Chip tone={tone}>{items.length} 项</Chip>}
+    >
       {items.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-          {empty}
-        </p>
+        <EmptyNote>{empty}</EmptyNote>
       ) : (
-        <ul className="divide-y rounded-lg border">
+        <ul className="divide-y">
           {items.map((item) => (
-            <li key={item.id} className="flex items-center gap-4 px-4 py-2.5">
+            <li key={item.id} className="flex items-center gap-4 py-2.5">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{item.title}</div>
-                <div className="truncate text-xs text-muted-foreground">
+                <div className="num truncate text-xs text-muted-foreground">
                   {[item.course, `${formatDue(item.dueAt)} 截止`]
                     .filter(Boolean)
                     .join(" · ")}
@@ -110,7 +126,7 @@ function AssignmentList({
                   </span>
                 ) : (
                   <>
-                    <div className="mb-1 text-right text-xs tabular-nums text-muted-foreground">
+                    <div className="num mb-1 text-right text-xs text-muted-foreground">
                       学习块 {item.blocksDone} / {item.blocks}
                     </div>
                     <Meter
@@ -125,7 +141,7 @@ function AssignmentList({
           ))}
         </ul>
       )}
-    </section>
+    </Panel>
   );
 }
 
@@ -138,48 +154,50 @@ function Overview({ data }: { data: Progress }) {
   const planned = data.courses.filter((course) => course.blocks > 0);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div className="col-span-2 rounded-lg border p-4">
-          <div className="text-sm text-muted-foreground">本周学习块完成率</div>
-          <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-3xl font-semibold tabular-nums">
-              {percent === null ? "—" : `${percent}%`}
-            </span>
-            <span className="text-sm text-muted-foreground">
-              {week.blocks === 0
-                ? "本周还没有安排学习块"
-                : `已完成 ${week.blocksDone} / ${week.blocks} 个`}
-            </span>
-          </div>
-          <div className="mt-3">
-            <Meter
+    <div className="flex flex-col gap-5">
+      <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <Panel title="本周学习块">
+          <div className="flex items-center gap-6">
+            <Ring
               done={week.blocksDone}
               total={week.blocks}
               label="本周学习块"
-            />
+              size={136}
+            >
+              <div className="num text-[30px] font-semibold leading-none tracking-tight">
+                {percent === null ? "–" : `${percent}%`}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">完成率</div>
+            </Ring>
+            <p className="num text-sm leading-relaxed text-muted-foreground">
+              {week.blocks === 0
+                ? "本周还没有安排学习块。在「作业」页点「生成计划」，助手会帮你排进空档。"
+                : `已完成 ${week.blocksDone} 个，还剩 ${week.blocks - week.blocksDone} 个。`}
+            </p>
           </div>
-        </div>
-        <Tile
-          label="本周已学习"
-          value={formatMinutes(week.minutesDone)}
-          detail={`计划 ${formatMinutes(week.minutes)}`}
-        />
-        <Tile
-          label="已逾期的作业"
-          value={String(data.overdue.length)}
-          detail={`未来 7 天到期 ${data.upcoming.length} 项`}
-        />
+        </Panel>
+        <Panel className="divide-y">
+          <Stat
+            label="本周已学习"
+            value={formatMinutes(week.minutesDone)}
+            detail={`计划 ${formatMinutes(week.minutes)}`}
+          />
+          <Stat
+            label="已逾期的作业"
+            value={String(data.overdue.length)}
+            detail={`未来 7 天到期 ${data.upcoming.length} 项`}
+            tone={data.overdue.length > 0 ? "danger" : undefined}
+          />
+        </Panel>
       </div>
 
-      <section>
-        <h2 className="mb-2 text-sm font-medium">各课程的学习块</h2>
+      <Panel title="各课程的学习块">
         {planned.length === 0 ? (
-          <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          <EmptyNote>
             还没有和作业关联的学习块。在「作业」页点「生成计划」，或者在「对话」里让助手帮你安排。
-          </p>
+          </EmptyNote>
         ) : (
-          <ul className="grid grid-cols-[minmax(6rem,14rem)_1fr_auto] items-center gap-x-4 gap-y-3 rounded-lg border p-4">
+          <ul className="grid grid-cols-[minmax(6rem,14rem)_1fr_auto] items-center gap-x-4 gap-y-3.5">
             {planned.map((course) => (
               <li key={course.course} className="contents">
                 <span className="truncate text-sm">{course.course}</span>
@@ -188,25 +206,28 @@ function Overview({ data }: { data: Progress }) {
                   total={course.blocks}
                   label={course.course}
                 />
-                <span className="text-right text-sm tabular-nums text-muted-foreground">
+                <span className="num text-right text-sm text-muted-foreground">
                   {course.blocksDone} / {course.blocks}
                 </span>
               </li>
             ))}
           </ul>
         )}
-      </section>
+      </Panel>
 
-      <AssignmentList
-        title="已逾期"
-        empty="没有逾期的作业。"
-        items={data.overdue}
-      />
-      <AssignmentList
-        title="未来 7 天到期"
-        empty="未来 7 天没有到期的作业。"
-        items={data.upcoming}
-      />
+      <div className="grid gap-5 2xl:grid-cols-2">
+        <AssignmentList
+          title="已逾期"
+          empty="没有逾期的作业。"
+          items={data.overdue}
+          tone="danger"
+        />
+        <AssignmentList
+          title="未来 7 天到期"
+          empty="未来 7 天没有到期的作业。"
+          items={data.upcoming}
+        />
+      </div>
     </div>
   );
 }
@@ -214,7 +235,7 @@ function Overview({ data }: { data: Progress }) {
 export function ProgressPage() {
   const { data, error, loading } = useQuery<Progress>("/api/progress");
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-5xl">
       <PageHeader
         title="进度"
         description="学习块的完成情况、快到期的作业，以及 AI 工具用量。"
@@ -228,7 +249,7 @@ export function ProgressPage() {
         <p className="text-sm text-muted-foreground">正在读取…</p>
       )}
       {data && <Overview data={data} />}
-      <div className="mt-6">
+      <div className="mt-5">
         <UsagePanel />
       </div>
     </div>

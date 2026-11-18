@@ -19,7 +19,7 @@ import { EventDialog, type DialogTarget } from "./calendar/EventDialog";
 import { allDayEntries, placeDay } from "./calendar/layout";
 import { PageHeader } from "./PageHeader";
 
-const HOUR_HEIGHT = 48;
+const HOUR_HEIGHT = 54;
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 /** The grid opens scrolled to this hour. */
 const FIRST_VISIBLE_HOUR = 7;
@@ -27,12 +27,20 @@ const FIRST_VISIBLE_HOUR = 7;
 /** Marks calendar entries that stand for study blocks rather than events. */
 const BLOCK_SOURCE = "study-block";
 
+/** Each kind of entry gets its own pastel fill and a stronger left edge. */
+const CATEGORIES = [
+  { label: "课程", className: "border-course bg-course-soft" },
+  { label: "日程", className: "border-activity bg-activity-soft" },
+  { label: "学习块", className: "border-study bg-study-soft" },
+  { label: "考试", className: "border-exam bg-exam-soft" },
+] as const;
+
 function entryColors(source: string): string {
-  if (source === BLOCK_SOURCE) return "border-chart-4 bg-chart-4/15";
-  if (source === "exam") return "border-destructive bg-destructive/10";
+  if (source === BLOCK_SOURCE) return CATEGORIES[2].className;
+  if (source === "exam") return CATEGORIES[3].className;
   return source === "manual"
-    ? "border-chart-2 bg-chart-2/15"
-    : "border-chart-1 bg-chart-1/15";
+    ? CATEGORIES[1].className
+    : CATEGORIES[0].className;
 }
 
 /** Presents a study block as a calendar entry so it shares the week layout. */
@@ -109,30 +117,37 @@ export function CalendarPage() {
         title="日程"
         description={formatRange(weekStart)}
         actions={
-          <div className="flex items-center gap-2">
+          <>
+            <div className="flex items-center rounded-lg border bg-card p-0.5">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="上一周"
+                onClick={() => setWeekStart(addDays(weekStart, -7))}
+              >
+                <ChevronLeft />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setWeekStart(startOfWeek(new Date()))}
+              >
+                本周
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="下一周"
+                onClick={() => setWeekStart(addDays(weekStart, 7))}
+              >
+                <ChevronRight />
+              </Button>
+            </div>
             <Button
-              variant="outline"
-              size="icon"
-              aria-label="上一周"
-              onClick={() => setWeekStart(addDays(weekStart, -7))}
+              variant="ghost"
+              className="text-muted-foreground"
+              onClick={() => setClearing(true)}
             >
-              <ChevronLeft />
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setWeekStart(startOfWeek(new Date()))}
-            >
-              本周
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label="下一周"
-              onClick={() => setWeekStart(addDays(weekStart, 7))}
-            >
-              <ChevronRight />
-            </Button>
-            <Button variant="outline" onClick={() => setClearing(true)}>
               <Trash2 />
               清除
             </Button>
@@ -140,7 +155,7 @@ export function CalendarPage() {
               <Plus />
               添加日程
             </Button>
-          </div>
+          </>
         }
       />
 
@@ -150,19 +165,29 @@ export function CalendarPage() {
         </p>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card">
         {/* Weekday header, with all-day entries underneath. */}
         <div className="grid grid-cols-[3.5rem_repeat(7,minmax(0,1fr))] border-b">
           <div />
           {days.map((day) => (
             <div
               key={day.getTime()}
-              className="border-l px-2 py-1.5 text-center text-sm"
+              className={cn(
+                "flex items-center justify-center gap-1.5 border-l px-2 py-2.5 text-sm",
+                isSameDay(day, today) && "bg-secondary/50",
+              )}
             >
-              <span className="text-muted-foreground">{weekdayLabel(day)}</span>{" "}
               <span
                 className={cn(
-                  "inline-block min-w-6 rounded-full px-1 font-medium",
+                  "text-muted-foreground",
+                  isSameDay(day, today) && "font-medium text-primary",
+                )}
+              >
+                {weekdayLabel(day)}
+              </span>
+              <span
+                className={cn(
+                  "num grid size-7 place-items-center rounded-full text-[15px] font-semibold",
                   isSameDay(day, today) && "bg-primary text-primary-foreground",
                 )}
               >
@@ -186,7 +211,7 @@ export function CalendarPage() {
                       type="button"
                       onClick={() => openEntry(entry)}
                       className={cn(
-                        "truncate rounded border-l-2 px-1 text-left text-xs",
+                        "truncate rounded-md border-l-[3px] px-1.5 py-0.5 text-left text-xs font-medium",
                         entryColors(entry.source),
                       )}
                     >
@@ -209,7 +234,7 @@ export function CalendarPage() {
               {HOURS.slice(1).map((hour) => (
                 <div
                   key={hour}
-                  className="absolute right-1 -translate-y-1/2 text-xs text-muted-foreground tabular-nums"
+                  className="num absolute right-2 -translate-y-1/2 text-xs text-muted-foreground"
                   style={{ top: hour * HOUR_HEIGHT }}
                 >
                   {String(hour).padStart(2, "0")}:00
@@ -218,14 +243,20 @@ export function CalendarPage() {
             </div>
 
             {days.map((day) => (
-              <div key={day.getTime()} className="relative border-l">
+              <div
+                key={day.getTime()}
+                className={cn(
+                  "relative border-l",
+                  isSameDay(day, today) && "bg-secondary/25",
+                )}
+              >
                 {HOURS.map((hour) => (
                   <button
                     key={hour}
                     type="button"
                     aria-label={`在 ${weekdayLabel(day)} ${hour}:00 添加日程`}
                     onClick={() => newAt(day, hour)}
-                    className="absolute inset-x-0 border-t border-border/60 hover:bg-accent/60"
+                    className="absolute inset-x-0 border-t border-border/70 hover:bg-accent/60"
                     style={{ top: hour * HOUR_HEIGHT, height: HOUR_HEIGHT }}
                   />
                 ))}
@@ -242,7 +273,7 @@ export function CalendarPage() {
                       type="button"
                       onClick={() => openEntry(entry)}
                       className={cn(
-                        "absolute flex flex-col justify-start overflow-hidden rounded border-l-2 px-1 py-0.5 text-left text-xs leading-tight",
+                        "absolute flex flex-col justify-start gap-0.5 overflow-hidden rounded-md border-l-[3px] px-1.5 py-1 text-left text-xs leading-tight transition-[filter] hover:brightness-[0.97] dark:hover:brightness-110",
                         entryColors(entry.source),
                         done && "opacity-60",
                       )}
@@ -255,18 +286,22 @@ export function CalendarPage() {
                     >
                       <div
                         className={cn(
-                          "truncate font-medium",
+                          "truncate font-semibold",
                           done && "line-through",
                         )}
                       >
                         {done ? "✓ " : ""}
                         {entry.title}
                       </div>
-                      {minutes >= 45 && (
-                        <div className="truncate text-muted-foreground">
+                      {minutes >= 40 && (
+                        <div className="num truncate text-foreground/60">
                           {formatTime(new Date(entry.start))}–
                           {formatTime(new Date(entry.end))}
-                          {entry.location ? ` · ${entry.location}` : ""}
+                        </div>
+                      )}
+                      {minutes >= 70 && entry.location && (
+                        <div className="truncate text-foreground/60">
+                          {entry.location}
                         </div>
                       )}
                     </button>
@@ -275,7 +310,7 @@ export function CalendarPage() {
 
                 {isSameDay(day, today) && (
                   <div
-                    className="pointer-events-none absolute inset-x-0 border-t-2 border-destructive"
+                    className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-destructive before:absolute before:-left-1 before:-top-[5px] before:size-2 before:rounded-full before:bg-destructive"
                     style={{
                       top:
                         ((today.getHours() * 60 + today.getMinutes()) / 60) *
@@ -287,6 +322,20 @@ export function CalendarPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="mt-3 flex shrink-0 items-center gap-5 px-1 text-xs text-muted-foreground">
+        {CATEGORIES.map((category) => (
+          <span key={category.label} className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                "size-3 rounded-[4px] border-l-[3px]",
+                category.className,
+              )}
+            />
+            {category.label}
+          </span>
+        ))}
       </div>
 
       {dialog && (

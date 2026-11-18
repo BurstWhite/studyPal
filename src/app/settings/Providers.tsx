@@ -47,7 +47,7 @@ const BASE_URL_HINT: Record<ProviderKind, string> = {
 };
 
 const selectClass =
-  "h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
+  "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
 function AddProvider({ onAdded }: { onAdded: () => void }) {
   const [kind, setKind] = useState<ProviderKind>("anthropic");
@@ -191,7 +191,7 @@ export function Providers() {
           </p>
         )}
         {data && data.length > 0 && (
-          <ul className="divide-y rounded-md border">
+          <ul className="divide-y rounded-xl border">
             {data.map((provider) => (
               <li
                 key={provider.id}

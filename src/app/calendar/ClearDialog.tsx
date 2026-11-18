@@ -56,7 +56,7 @@ export function ClearDialog({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="m-auto w-[26rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-background p-6 text-foreground shadow-lg backdrop:bg-black/40"
+      className="m-auto w-[26rem] max-w-[calc(100vw-2rem)] rounded-2xl border bg-card p-6 text-foreground shadow-2xl backdrop:bg-black/30 backdrop:backdrop-blur-[2px]"
     >
       <h2 className="text-lg font-semibold">清除日程</h2>
       <p className="mt-1 text-sm text-muted-foreground">
@@ -67,7 +67,7 @@ export function ClearDialog({
         {SCOPES.map((option) => (
           <label
             key={option.scope}
-            className="flex cursor-pointer items-start gap-3 rounded-md border p-3 has-checked:border-ring has-checked:bg-accent/50"
+            className="flex cursor-pointer items-start gap-3 rounded-xl border p-3 has-checked:border-primary/50 has-checked:bg-secondary/60"
           >
             <input
               type="radio"

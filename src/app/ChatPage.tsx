@@ -1,6 +1,15 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Check, Loader2, Plus, Send, Trash2, Wrench, X } from "lucide-react";
+import {
+  ArrowUp,
+  Check,
+  Loader2,
+  Plus,
+  Sparkles,
+  Trash2,
+  Wrench,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 import type { ChatSummary, Provider } from "../server/llm/store";
@@ -64,13 +73,25 @@ export function isWaitingForReply(
   return last.type === "tool" && last.result !== undefined;
 }
 
+/** The assistant's mark, shown where one of its replies begins. */
+function AssistantMark() {
+  return (
+    <span
+      aria-hidden
+      className="absolute left-0 top-0 grid size-7 place-items-center rounded-full bg-secondary text-primary"
+    >
+      <Sparkles className="size-3.5" />
+    </span>
+  );
+}
+
 /** Three pulsing dots in a reply bubble, shown until the first words arrive. */
 function TypingIndicator() {
   return (
     <div
       role="status"
       aria-label="正在回复"
-      className="flex items-center gap-1 self-start rounded-2xl bg-muted px-4 py-3"
+      className="flex items-center gap-1 self-start rounded-2xl rounded-tl-md bg-muted px-4 py-3"
     >
       {[0, 1, 2].map((dot) => (
         <span
@@ -97,12 +118,12 @@ function ToolRow({
   return (
     <div
       className={cn(
-        "rounded-md border px-3 py-2 text-sm",
-        item.awaiting ? "border-ring bg-accent/40" : "bg-muted/40",
+        "rounded-xl border px-3.5 py-2.5 text-sm",
+        item.awaiting ? "border-primary/40 bg-secondary/60" : "bg-card",
       )}
     >
       <div className="flex items-center gap-2">
-        <Wrench className="size-3.5 shrink-0 text-muted-foreground" />
+        <Wrench className="size-3.5 shrink-0 text-primary" />
         <span className="font-medium">{summary.label}</span>
         <span className="flex-1" />
         {item.awaiting ? (
@@ -114,7 +135,7 @@ function ToolRow({
         ) : failed ? (
           <span className="text-xs text-destructive">未成功</span>
         ) : (
-          <Check className="size-3.5 text-muted-foreground" />
+          <Check className="size-3.5 text-primary" />
         )}
       </div>
       {summary.lines.length > 0 && (
@@ -130,7 +151,7 @@ function ToolRow({
         </p>
       )}
       {item.awaiting && (
-        <div className="mt-2 flex gap-2 pl-5.5">
+        <div className="mt-3 flex gap-2 pl-5.5">
           <Button size="sm" onClick={() => onDecision(item.id, true)}>
             <Check />
             确认
@@ -306,7 +327,7 @@ function Conversation({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
         <div className="mx-auto flex max-w-3xl flex-col gap-3">
           {error && (
             <p role="alert" className="text-sm text-destructive">
@@ -314,32 +335,55 @@ function Conversation({
             </p>
           )}
           {data && items.length === 0 && (
-            <p className="py-12 text-center text-sm text-muted-foreground">
-              可以问「这周还有哪些作业没交」，或者让它「把数据结构实验拆成几个学习块排进这周」。
-            </p>
+            <div className="flex flex-col items-center gap-3 py-16 text-center">
+              <span className="grid size-11 place-items-center rounded-2xl bg-secondary text-primary">
+                <Sparkles className="size-5" />
+              </span>
+              <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+                可以问「这周还有哪些作业没交」，或者让它「把数据结构实验拆成几个学习块排进这周」。
+              </p>
+            </div>
           )}
-          {items.map((item, index) =>
-            item.type === "user" ? (
+          {items.map((item, index) => {
+            // The assistant's mark sits beside the first part of each reply.
+            const opensReply =
+              item.type !== "user" &&
+              items[index - 1]?.type !== "assistant" &&
+              items[index - 1]?.type !== "tool";
+            return item.type === "user" ? (
               <div
                 key={index}
-                className="max-w-[80%] self-end whitespace-pre-wrap rounded-2xl bg-primary px-4 py-2 text-sm text-primary-foreground"
+                className="mt-2 max-w-[80%] self-end whitespace-pre-wrap rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-sm leading-relaxed text-foreground"
               >
                 {item.text}
               </div>
-            ) : item.type === "assistant" ? (
-              <div key={index} className={markdownClass}>
-                <Markdown>{item.text}</Markdown>
-              </div>
             ) : (
-              <ToolRow key={item.id} item={item} onDecision={decide} />
-            ),
+              <div
+                key={item.type === "tool" ? item.id : index}
+                className="relative pl-10"
+              >
+                {opensReply && <AssistantMark />}
+                {item.type === "assistant" ? (
+                  <div className={cn(markdownClass, "pt-1")}>
+                    <Markdown>{item.text}</Markdown>
+                  </div>
+                ) : (
+                  <ToolRow item={item} onDecision={decide} />
+                )}
+              </div>
+            );
+          })}
+          {isWaitingForReply(items, running, thinking) && (
+            <div className="relative flex pl-10">
+              {items.at(-1)?.type === "user" && <AssistantMark />}
+              <TypingIndicator />
+            </div>
           )}
-          {isWaitingForReply(items, running, thinking) && <TypingIndicator />}
           <div ref={bottomRef} />
         </div>
       </div>
 
-      <div className="border-t px-6 py-3">
+      <div className="px-8 pb-5 pt-2">
         <div className="mx-auto flex max-w-3xl flex-col gap-2">
           {problem && (
             <p role="alert" className="text-sm text-destructive">
@@ -351,23 +395,24 @@ function Conversation({
               这段对话使用的模型服务已被删除，只能查看。请新建对话继续。
             </p>
           ) : (
-            <div className="flex items-end gap-2">
+            <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 pl-1 transition-colors focus-within:border-primary/50">
               <Textarea
                 aria-label="消息"
-                rows={2}
+                rows={1}
                 placeholder="输入消息，Enter 发送，Shift + Enter 换行"
-                className="max-h-40 min-h-0 resize-none"
+                className="max-h-40 min-h-0 resize-none border-0 bg-transparent py-1.5 focus-visible:ring-0"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={onKeyDown}
               />
               <Button
-                size="icon"
+                size="icon-sm"
+                className="rounded-full"
                 aria-label="发送"
                 disabled={running || !draft.trim()}
                 onClick={() => void send()}
               >
-                {running ? <Loader2 className="animate-spin" /> : <Send />}
+                {running ? <Loader2 className="animate-spin" /> : <ArrowUp />}
               </Button>
             </div>
           )}
@@ -461,13 +506,16 @@ export function ChatPage() {
 
   return (
     // Cancel the page padding so the conversation can use the full height.
-    <div className="-m-6 flex h-[calc(100%+3rem)]">
-      <aside className="flex w-56 shrink-0 flex-col border-r">
-        <div className="flex flex-col gap-2 border-b p-3">
+    <div className="-mx-8 -my-7 flex h-[calc(100%+3.5rem)]">
+      <aside className="flex w-60 shrink-0 flex-col border-r">
+        <div className="flex flex-col gap-2 p-3 pt-6">
+          <h1 className="px-1 pb-1 text-[22px] font-semibold tracking-tight">
+            对话
+          </h1>
           {providers.data && providers.data.length > 1 && (
             <select
               aria-label="新对话使用的模型服务"
-              className="h-8 w-full rounded-md border bg-transparent px-2 text-xs"
+              className="h-8 w-full rounded-lg border bg-card px-2 text-xs"
               value={chosenProvider?.id}
               onChange={(event) => setProviderId(Number(event.target.value))}
             >
@@ -487,7 +535,7 @@ export function ChatPage() {
             新对话
           </Button>
         </div>
-        <ul className="min-h-0 flex-1 overflow-y-auto p-2">
+        <ul className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
           {chats.data?.map((chat) => (
             <li key={chat.id} className="group relative">
               <button
@@ -495,10 +543,10 @@ export function ChatPage() {
                 onClick={() => setActiveId(chat.id)}
                 aria-current={chat.id === activeId ? "true" : undefined}
                 className={cn(
-                  "w-full truncate rounded-md py-1.5 pl-2 pr-8 text-left text-sm",
+                  "w-full truncate rounded-lg py-2 pl-2.5 pr-8 text-left text-sm",
                   chat.id === activeId
-                    ? "bg-accent font-medium"
-                    : "hover:bg-accent/60",
+                    ? "bg-card font-medium shadow-[0_0_0_1px_var(--border)]"
+                    : "text-muted-foreground hover:bg-card/60 hover:text-foreground",
                 )}
               >
                 {chat.title || "新对话"}
@@ -516,7 +564,7 @@ export function ChatPage() {
         </ul>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section className="flex min-w-0 flex-1 flex-col bg-card">
         {(loadError ?? problem) && (
           <p role="alert" className="px-6 pt-4 text-sm text-destructive">
             {loadError ? `无法读取数据：${loadError}` : problem}
