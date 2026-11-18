@@ -215,10 +215,17 @@ function ModelPicker({
   });
 
   return (
-    <div className="relative inline-flex items-center">
+    <div className="relative inline-flex shrink-0 items-center">
+      {!lists && (
+        <Loader2
+          aria-label="正在获取模型列表"
+          className="mr-1 size-3.5 animate-spin text-muted-foreground"
+        />
+      )}
       <select
         aria-label="对话使用的模型"
-        className="h-8 max-w-[22rem] appearance-none truncate rounded-lg border bg-card py-0 pl-3 pr-8 text-sm font-medium outline-none hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
+        title="对话使用的模型"
+        className="h-8 max-w-[15rem] appearance-none truncate rounded-full bg-transparent py-0 pl-3 pr-7 text-xs text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60 disabled:hover:bg-transparent"
         disabled={disabled}
         value={value ? choiceKey(value) : ""}
         onChange={(event) => {
@@ -245,13 +252,7 @@ function ModelPicker({
           </optgroup>
         ))}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-2.5 size-4 text-muted-foreground" />
-      {!lists && (
-        <Loader2
-          aria-label="正在获取模型列表"
-          className="ml-2 size-3.5 animate-spin text-muted-foreground"
-        />
-      )}
+      <ChevronDown className="pointer-events-none absolute right-2.5 size-3.5 text-muted-foreground" />
     </div>
   );
 }
@@ -417,17 +418,19 @@ function Conversation({
 
   const unavailable = chat?.providerId === null;
 
+  // Sits in the message box, beside the send button.
+  const picker = (
+    <ModelPicker
+      providers={providers}
+      lists={modelLists}
+      value={pendingSwitch ?? activeChoice}
+      disabled={!chat || running}
+      onChange={chooseModel}
+    />
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b px-8 py-2.5">
-        <ModelPicker
-          providers={providers}
-          lists={modelLists}
-          value={pendingSwitch ?? activeChoice}
-          disabled={!chat || running}
-          onChange={chooseModel}
-        />
-      </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
         <div className="mx-auto flex max-w-3xl flex-col gap-3">
           {error && (
@@ -511,9 +514,12 @@ function Conversation({
             />
           )}
           {unavailable ? (
-            <p className="text-sm text-muted-foreground">
-              这段对话使用的模型服务已被删除，只能查看。请新建对话，或在上方换一个模型继续。
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="flex-1 text-sm text-muted-foreground">
+                这段对话使用的模型服务已被删除，只能查看。请新建对话，或在右边换一个模型继续。
+              </p>
+              {picker}
+            </div>
           ) : (
             <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 pl-1 transition-colors focus-within:border-primary/50">
               <Textarea
@@ -525,6 +531,7 @@ function Conversation({
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={onKeyDown}
               />
+              {picker}
               <Button
                 size="icon-sm"
                 className="rounded-full"
