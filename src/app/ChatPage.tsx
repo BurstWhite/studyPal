@@ -17,41 +17,27 @@ import Markdown from "react-markdown";
 import type { ModelList } from "../server/llm/models";
 import type { ChatSummary, Provider, ProviderKind } from "../server/llm/store";
 import type { DisplayItem } from "../server/llm/turn";
-import type { StreamEvent } from "../server/routes/chat";
 import { DECLINED_MESSAGE } from "../shared/chat";
 import { cn } from "../lib/utils";
 import { api, useQuery } from "./api";
+import {
+  decide,
+  forgetChat,
+  onTurnFinished,
+  sendMessage,
+  setProblem,
+  showStored,
+  takeReturnedDraft,
+  useChatView,
+  useRunningChats,
+  type ChatView,
+  type LiveItem,
+  type LiveTool,
+} from "./chat/liveChats";
 import { takePrompt } from "./chat/pendingPrompt";
 import { summarizeTool } from "./chat/toolSummary";
 
-/** A tool call as shown while its turn is still running. */
-type LiveTool = Extract<DisplayItem, { type: "tool" }> & {
-  /** Waiting for the user to approve or decline. */
-  awaiting?: boolean;
-  declined?: boolean;
-};
-export type LiveItem = Exclude<DisplayItem, { type: "tool" }> | LiveTool;
-
-/** Reads a `text/event-stream` body and yields each event's JSON payload. */
-async function* readEvents(response: Response): AsyncGenerator<StreamEvent> {
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return;
-    buffer += decoder.decode(value, { stream: true });
-    let boundary: number;
-    while ((boundary = buffer.indexOf("\n\n")) >= 0) {
-      const block = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      for (const line of block.split("\n")) {
-        if (line.startsWith("data: "))
-          yield JSON.parse(line.slice(6)) as StreamEvent;
-      }
-    }
-  }
-}
+export type { LiveItem } from "./chat/liveChats";
 
 const markdownClass =
   "text-sm leading-relaxed [&_p]:my-2 first:[&_p]:mt-0 last:[&_p]:mb-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:mt-3 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:font-semibold [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:text-[0.85em] [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_a]:underline [&_table]:my-2 [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground";
@@ -319,12 +305,15 @@ function SwitchPrompt({
   );
 }
 
+/** What a chat shows before it has loaded. */
+const NO_VIEW: ChatView = { items: [], running: false, thinking: false };
+
 function Conversation({
   chatId,
   providers,
   modelLists,
   initialMessage,
-  onTurnFinished,
+  onChatChanged,
   onReset,
 }: {
   chatId: number;
@@ -332,7 +321,8 @@ function Conversation({
   modelLists: ModelList[] | undefined;
   /** Sent automatically once the conversation has loaded. */
   initialMessage?: string;
-  onTurnFinished: () => void;
+  /** The chat's provider or model changed. */
+  onChatChanged: () => void;
   /** Starts a new chat with the given model, leaving this one as it is. */
   onReset: (choice: ModelChoice) => void;
 }) {
@@ -341,19 +331,25 @@ function Conversation({
   );
   const [chat, setChat] = useState<ChatSummary>();
   const [pendingSwitch, setPendingSwitch] = useState<ModelChoice>();
-  const [items, setItems] = useState<LiveItem[]>([]);
   const [draft, setDraft] = useState("");
-  const [running, setRunning] = useState(false);
-  const [thinking, setThinking] = useState(false);
-  const [problem, setProblem] = useState<string>();
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Turns live outside this view, so they carry on while another chat is open.
+  const view = useChatView(chatId) ?? NO_VIEW;
+  const { items, running, thinking, problem } = view;
 
   useEffect(() => {
     if (data) {
-      setItems(data.items);
+      showStored(chatId, data.items);
       setChat(data.chat);
     }
-  }, [data]);
+  }, [data, chatId]);
+
+  // A turn that failed, maybe while another chat was open, gives its message back.
+  useEffect(() => {
+    if (view.returnedDraft === undefined) return;
+    setDraft(view.returnedDraft);
+    takeReturnedDraft(chatId);
+  }, [view.returnedDraft, chatId]);
 
   const activeModel = chat && currentModel(chat, providers);
   const activeChoice: ModelChoice | undefined =
@@ -365,16 +361,19 @@ function Conversation({
 
   const applySwitch = async (choice: ModelChoice) => {
     setPendingSwitch(undefined);
-    setProblem(undefined);
+    setProblem(chatId, undefined);
     try {
       const result = await api<{ chat: ChatSummary }>(`/api/chats/${chatId}`, {
         method: "PATCH",
         body: JSON.stringify(choice),
       });
       setChat(result.chat);
-      onTurnFinished();
+      onChatChanged();
     } catch (reason) {
-      setProblem(reason instanceof Error ? reason.message : String(reason));
+      setProblem(
+        chatId,
+        reason instanceof Error ? reason.message : String(reason),
+      );
     }
   };
 
@@ -389,116 +388,18 @@ function Conversation({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [items, thinking]);
 
-  const updateTool = (id: string, change: Partial<LiveTool>) =>
-    setItems((current) =>
-      current.map((item) =>
-        item.type === "tool" && item.id === id ? { ...item, ...change } : item,
-      ),
-    );
-
-  const decide = (id: string, approve: boolean) => {
-    updateTool(id, { awaiting: false });
-    api(`/api/chat-approvals/${encodeURIComponent(id)}`, {
-      method: "POST",
-      body: JSON.stringify({ approve }),
-    }).catch((reason: unknown) =>
-      setProblem(reason instanceof Error ? reason.message : String(reason)),
-    );
-  };
-
-  const send = async (override?: string) => {
+  const send = (override?: string) => {
     const text = (override ?? draft).trim();
     if (!text || running) return;
-    const before = items;
     setDraft("");
-    setProblem(undefined);
-    setRunning(true);
-    setItems([...before, { type: "user", text }]);
-
-    // A failed turn is not saved, so put the message back for another try.
-    const fail = (message: string) => {
-      setItems(before);
-      setDraft(text);
-      setProblem(message);
-    };
-
-    try {
-      const response = await fetch(`/api/chats/${chatId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (!response.ok || !response.body) {
-        const body = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        fail(body?.error ?? `请求失败（HTTP ${response.status}）`);
-        return;
-      }
-
-      let finished = false;
-      for await (const event of readEvents(response)) {
-        switch (event.type) {
-          case "thinking":
-            setThinking(true);
-            break;
-          case "text":
-            setThinking(false);
-            setItems((current) => {
-              const last = current.at(-1);
-              return last?.type === "assistant"
-                ? [
-                    ...current.slice(0, -1),
-                    { type: "assistant", text: last.text + event.delta },
-                  ]
-                : [...current, { type: "assistant", text: event.delta }];
-            });
-            break;
-          case "tool_call":
-            setThinking(false);
-            setItems((current) => [
-              ...current,
-              {
-                type: "tool",
-                id: event.id,
-                name: event.name,
-                input: event.input,
-                awaiting: event.needsApproval,
-              },
-            ]);
-            break;
-          case "tool_result":
-            updateTool(event.id, {
-              awaiting: false,
-              declined: event.declined,
-              result: { ok: event.ok, content: "" },
-            });
-            break;
-          case "done":
-            finished = true;
-            setItems(event.items);
-            break;
-          case "error":
-            finished = true;
-            fail(event.message);
-            break;
-        }
-      }
-      if (!finished) fail("连接中断了，这条消息没有处理完，请重试。");
-    } catch {
-      fail("连接中断了，这条消息没有处理完，请重试。");
-    } finally {
-      setRunning(false);
-      setThinking(false);
-      onTurnFinished();
-    }
+    void sendMessage(chatId, text);
   };
 
   const sentInitial = useRef(false);
   useEffect(() => {
     if (data && initialMessage && !sentInitial.current) {
       sentInitial.current = true;
-      void send(initialMessage);
+      send(initialMessage);
     }
     // Runs once, when the conversation first loads.
   }, [data, initialMessage]);
@@ -510,7 +411,7 @@ function Conversation({
       !event.nativeEvent.isComposing
     ) {
       event.preventDefault();
-      void send();
+      send();
     }
   };
 
@@ -568,7 +469,10 @@ function Conversation({
                     <Markdown>{item.text}</Markdown>
                   </div>
                 ) : (
-                  <ToolRow item={item} onDecision={decide} />
+                  <ToolRow
+                    item={item}
+                    onDecision={(id, approve) => decide(chatId, id, approve)}
+                  />
                 )}
               </div>
             );
@@ -626,7 +530,7 @@ function Conversation({
                 className="rounded-full"
                 aria-label="发送"
                 disabled={running || !draft.trim()}
-                onClick={() => void send()}
+                onClick={() => send()}
               >
                 {running ? <Loader2 className="animate-spin" /> : <ArrowUp />}
               </Button>
@@ -653,6 +557,11 @@ export function ChatPage() {
     const text = takePrompt();
     if (text) setHandoff({ text });
   }, []);
+
+  // A finished turn retitles and reorders the list, whichever chat is open.
+  const reloadChats = chats.reload;
+  useEffect(() => onTurnFinished(reloadChats), [reloadChats]);
+  const runningChats = useRunningChats();
 
   const defaultProvider =
     providers.data?.find((provider) => provider.isDefault) ??
@@ -725,6 +634,7 @@ export function ChatPage() {
     setProblem(undefined);
     try {
       await api(`/api/chats/${id}`, { method: "DELETE" });
+      forgetChat(id);
       if (activeId === id) setActiveId(undefined);
       chats.reload();
     } catch (reason) {
@@ -768,14 +678,21 @@ export function ChatPage() {
               >
                 {chat.title || "新对话"}
               </button>
-              <button
-                type="button"
-                aria-label={`删除对话 ${chat.title || "新对话"}`}
-                onClick={() => void remove(chat.id)}
-                className="absolute right-1 top-1/2 hidden -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-destructive group-hover:block focus-visible:block"
-              >
-                <Trash2 className="size-3.5" />
-              </button>
+              {runningChats.includes(chat.id) ? (
+                <Loader2
+                  aria-label="正在回复"
+                  className="absolute right-2 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground"
+                />
+              ) : (
+                <button
+                  type="button"
+                  aria-label={`删除对话 ${chat.title || "新对话"}`}
+                  onClick={() => void remove(chat.id)}
+                  className="absolute right-1 top-1/2 hidden -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-destructive group-hover:block focus-visible:block"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -805,7 +722,7 @@ export function ChatPage() {
             initialMessage={
               handoff?.chatId === activeId ? handoff.text : undefined
             }
-            onTurnFinished={chats.reload}
+            onChatChanged={chats.reload}
           />
         ) : (
           providers.data && (
