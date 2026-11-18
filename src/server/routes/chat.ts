@@ -25,6 +25,7 @@ import {
   type ProviderKind,
 } from "../llm/store";
 import {
+  defaultModel,
   fetchModels,
   forgetModels,
   modelLists,
@@ -208,7 +209,9 @@ export const chatRoutes = {
     POST: guarded(async (req: Request) => {
       try {
         const input = parseProviderInput(await readJson(req), true);
-        return Response.json(await testConnection(input, input.model));
+        return Response.json(
+          await testConnection(input, input.model || undefined),
+        );
       } catch (error) {
         if (error instanceof ProviderInputError) return bad(error.message);
         throw error;
@@ -248,7 +251,10 @@ export const chatRoutes = {
           error: "找不到这个模型服务的 API key，请删除后重新添加。",
         });
       return Response.json(
-        await testConnection({ ...provider, apiKey }, provider.model),
+        await testConnection(
+          { ...provider, apiKey },
+          provider.model || undefined,
+        ),
       );
     }),
   },
@@ -276,9 +282,17 @@ export const chatRoutes = {
           ? getProvider(getDb(), body.providerId)
           : undefined;
       if (!provider) return bad("请先选择一个模型服务");
-      const model = typeof body.model === "string" ? body.model.trim() : "";
+      let model = typeof body.model === "string" ? body.model.trim() : "";
+      // Every new chat records its model, so it never depends on a default.
+      if (!model) {
+        try {
+          model = await defaultModel(getDb(), provider);
+        } catch (error) {
+          return bad(error instanceof Error ? error.message : String(error));
+        }
+      }
       return Response.json(
-        { id: createChat(getDb(), provider, model || null) },
+        { id: createChat(getDb(), provider, model) },
         { status: 201 },
       );
     }),

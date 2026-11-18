@@ -1069,9 +1069,9 @@ describe("providers and chats", () => {
     expect(() =>
       parseProviderInput({ ...anthropic, kind: "other" }, true),
     ).toThrow(ProviderInputError);
-    expect(() =>
+    expect(
       parseProviderInput({ ...anthropic, model: " " }, true),
-    ).toThrow("模型名称");
+    ).toMatchObject({ model: "", name: "Anthropic" });
     expect(() =>
       parseProviderInput({ ...anthropic, apiKey: "" }, true),
     ).toThrow("API key");
@@ -1274,9 +1274,20 @@ describe("DeepSeek and OpenCode providers", () => {
         true,
       ).kind,
     ).toBe("opencode");
-    expect(() =>
-      parseProviderInput({ kind: "opencode", model: "", apiKey: "k" }, true),
-    ).toThrow("模型名称");
+    // The model is optional now: chats pick theirs from the service's list.
+    expect(
+      parseProviderInput({ kind: "opencode-go", apiKey: "k" }, true),
+    ).toMatchObject({ model: "", name: "OpenCode Go" });
+    expect(
+      parseProviderInput(
+        {
+          kind: "openai-compatible",
+          baseUrl: "https://api.example.com/v1",
+          apiKey: "k",
+        },
+        true,
+      ).name,
+    ).toBe("api.example.com");
     expect(() =>
       parseProviderInput(
         { kind: "deepseek", model: "m", apiKey: "k", baseUrl: "nope" },

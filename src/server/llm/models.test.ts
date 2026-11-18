@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { openDatabase } from "../db";
-import { fetchModels, testConnection } from "./models";
+import { defaultModel, fetchModels, pickModel, testConnection } from "./models";
 import {
   appendMessages,
   createChat,
@@ -141,6 +141,36 @@ describe("connection test", () => {
     expect(api.requests[0]!.body.messages).toHaveLength(1);
   });
 
+  test("without a model, uses one from the service's list and says which", async () => {
+    const api = recording((url) =>
+      url.endsWith("/models")
+        ? Response.json({
+            data: [{ id: "deepseek-v4-pro" }, { id: "deepseek-flash" }],
+          })
+        : Response.json({ choices: [{ message: { content: "OK" } }] }),
+    );
+    const result = await testConnection({
+      kind: "deepseek",
+      baseUrl: "",
+      apiKey: "sk",
+      fetch: api.fetchImpl,
+    });
+    expect(result).toMatchObject({ ok: true, model: "deepseek-flash" });
+    expect(api.requests[1]!.body.model).toBe("deepseek-flash");
+  });
+
+  test("without a model, an empty list is reported", async () => {
+    const api = recording(() => Response.json({ data: [] }));
+    expect(
+      await testConnection({
+        kind: "opencode",
+        baseUrl: "",
+        apiKey: "sk",
+        fetch: api.fetchImpl,
+      }),
+    ).toEqual({ ok: false, error: "这个服务没有列出任何可用的模型。" });
+  });
+
   test("reports why it failed", async () => {
     const api = recording(() => new Response("{}", { status: 404 }));
     expect(
@@ -232,5 +262,32 @@ describe("a chat's model", () => {
       kind: "anthropic",
       model: "claude-sonnet-5-5",
     });
+  });
+});
+
+describe("default model", () => {
+  test("prefers known everyday models, else the first listed", () => {
+    expect(pickModel("deepseek", ["deepseek-v4-pro", "deepseek-flash"])).toBe(
+      "deepseek-flash",
+    );
+    expect(
+      pickModel("anthropic", ["claude-opus-5-5", "claude-haiku-5-5"]),
+    ).toBe("claude-opus-5-5");
+    expect(pickModel("opencode", [])).toBeUndefined();
+  });
+
+  test("a model set on the provider wins without asking the service", async () => {
+    const d = openDatabase(":memory:");
+    const id = await createProvider(
+      d,
+      parseProviderInput(
+        { kind: "deepseek", model: "deepseek-v4-pro", apiKey: "sk" },
+        true,
+      ),
+      keys,
+    );
+    expect(await defaultModel(d, getProvider(d, id)!, keys)).toBe(
+      "deepseek-v4-pro",
+    );
   });
 });

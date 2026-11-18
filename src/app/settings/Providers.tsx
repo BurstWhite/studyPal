@@ -23,23 +23,6 @@ const KIND_LABEL: Record<ProviderKind, string> = {
   "opencode-go": "OpenCode Go",
 };
 
-/** The model suggested when a kind is chosen; empty where there is no obvious one. */
-const DEFAULT_MODEL: Record<ProviderKind, string> = {
-  anthropic: "claude-opus-5-5",
-  "openai-compatible": "",
-  deepseek: "deepseek-flash",
-  opencode: "",
-  "opencode-go": "",
-};
-
-const MODEL_HINT: Record<ProviderKind, string> = {
-  anthropic: "claude-opus-5-5",
-  "openai-compatible": "服务商提供的模型名称",
-  deepseek: "deepseek-flash 或 deepseek-v4-pro",
-  opencode: "例如 kimi-k3、glm-5.3、deepseek-v4-pro",
-  "opencode-go": "例如 kimi-k3、glm-5.3、deepseek-v4-pro",
-};
-
 /** Shown as the Base URL placeholder; kinds with a built-in address may leave it blank. */
 const BASE_URL_HINT: Record<ProviderKind, string> = {
   anthropic: "https://api.anthropic.com",
@@ -76,7 +59,7 @@ function TestOutcome({ state }: { state: TestState }) {
       )}
       <span className="min-w-0 break-words">
         {state.ok
-          ? `连接正常，${(state.latencyMs / 1000).toFixed(1)} 秒收到回复${state.reply ? `：「${state.reply}」` : ""}`
+          ? `连接正常：${state.model} 在 ${(state.latencyMs / 1000).toFixed(1)} 秒内回复${state.reply ? `「${state.reply}」` : ""}`
           : state.error}
       </span>
     </span>
@@ -104,7 +87,6 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
   const [kind, setKind] = useState<ProviderKind>("anthropic");
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const [model, setModel] = useState(DEFAULT_MODEL.anthropic);
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
@@ -116,7 +98,7 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
   }>();
 
   // An old result says nothing about settings that have since changed.
-  useEffect(() => setTest(undefined), [kind, baseUrl, model, apiKey]);
+  useEffect(() => setTest(undefined), [kind, baseUrl, apiKey]);
 
   useEffect(() => {
     setOffered(undefined);
@@ -151,16 +133,9 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
         kind,
         name,
         baseUrl,
-        model,
         apiKey,
       }),
     );
-  };
-
-  const changeKind = (next: ProviderKind) => {
-    // Swap the suggested model only if the user has not typed their own.
-    if (model === DEFAULT_MODEL[kind]) setModel(DEFAULT_MODEL[next]);
-    setKind(next);
   };
 
   const submit = async (event: FormEvent) => {
@@ -170,13 +145,11 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
     try {
       await api("/api/providers", {
         method: "POST",
-        body: JSON.stringify({ kind, name, baseUrl, model, apiKey }),
+        body: JSON.stringify({ kind, name, baseUrl, apiKey }),
       });
       setName("");
       setBaseUrl("");
       setApiKey("");
-      // Back to the suggestion for this kind, so the next entry starts clean.
-      setModel(DEFAULT_MODEL[kind]);
       onAdded();
     } catch (reason) {
       setProblem(reason instanceof Error ? reason.message : String(reason));
@@ -197,7 +170,7 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
             id="provider-kind"
             className={selectClass}
             value={kind}
-            onChange={(event) => changeKind(event.target.value as ProviderKind)}
+            onChange={(event) => setKind(event.target.value as ProviderKind)}
           >
             <option value="anthropic">Anthropic（Claude）</option>
             <option value="deepseek">DeepSeek</option>
@@ -207,47 +180,6 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
           </select>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="provider-model">模型</Label>
-          <Input
-            id="provider-model"
-            list="provider-model-options"
-            placeholder={MODEL_HINT[kind]}
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-          />
-          <datalist id="provider-model-options">
-            {offered?.models.map((id) => (
-              <option key={id} value={id} />
-            ))}
-          </datalist>
-          {offered && (
-            <span
-              className={cn(
-                "text-xs",
-                offered.error ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
-              {offered.error
-                ? `获取模型列表失败：${offered.error}`
-                : `已获取 ${offered.models.length} 个可用模型，可从输入框的下拉建议里选择`}
-            </span>
-          )}
-        </div>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="provider-base-url">
-          Base URL
-          {kind === "openai-compatible" ? "" : "（可不填，默认官方地址）"}
-        </Label>
-        <Input
-          id="provider-base-url"
-          placeholder={BASE_URL_HINT[kind]}
-          value={baseUrl}
-          onChange={(event) => setBaseUrl(event.target.value)}
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1.5">
           <Label htmlFor="provider-key">API key</Label>
           <Input
             id="provider-key"
@@ -255,6 +187,20 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
             autoComplete="off"
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="provider-base-url">
+            Base URL
+            {kind === "openai-compatible" ? "" : "（可不填，默认官方地址）"}
+          </Label>
+          <Input
+            id="provider-base-url"
+            placeholder={BASE_URL_HINT[kind]}
+            value={baseUrl}
+            onChange={(event) => setBaseUrl(event.target.value)}
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -266,6 +212,18 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
           />
         </div>
       </div>
+      {offered && (
+        <p
+          className={cn(
+            "text-xs",
+            offered.error ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {offered.error
+            ? `获取模型列表失败：${offered.error}`
+            : `已获取 ${offered.models.length} 个可用模型。不用在这里选，对话时在输入框旁切换。`}
+        </p>
+      )}
       {problem && (
         <p role="alert" className="text-sm text-destructive">
           {problem}
@@ -278,7 +236,7 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
         <Button
           type="button"
           variant="outline"
-          disabled={test === "running" || !apiKey.trim() || !model.trim()}
+          disabled={test === "running" || !apiKey.trim()}
           onClick={() => void testDraft()}
         >
           <Plug />
@@ -341,7 +299,8 @@ export function Providers() {
                       )}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">
-                      {KIND_LABEL[provider.kind]} · {provider.model}
+                      {KIND_LABEL[provider.kind]}
+                      {provider.model ? ` · ${provider.model}` : ""}
                       {provider.baseUrl ? ` · ${provider.baseUrl}` : ""}
                     </div>
                   </div>

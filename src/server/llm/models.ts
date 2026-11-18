@@ -94,19 +94,54 @@ export async function fetchModels(connection: Connection): Promise<string[]> {
 }
 
 export type TestResult =
-  { ok: true; reply: string; latencyMs: number } | { ok: false; error: string };
+  | { ok: true; model: string; reply: string; latencyMs: number }
+  | { ok: false; error: string };
+
+/**
+ * Models a new chat starts on when nothing says otherwise, most preferred
+ * first. A kind without an entry takes the first model its service lists
+ * (Anthropic lists its newest first).
+ */
+const PREFERRED_MODELS: Partial<Record<ProviderKind, string[]>> = {
+  deepseek: ["deepseek-flash", "deepseek-chat"],
+};
+
+/** The model to use from a service's list, or undefined if it is empty. */
+export function pickModel(
+  kind: ProviderKind,
+  models: string[],
+): string | undefined {
+  return (
+    PREFERRED_MODELS[kind]?.find((model) => models.includes(model)) ?? models[0]
+  );
+}
 
 const TEST_PROMPT = "Reply with the single word: OK";
 
 /** Sends one short message and reports the reply, or why there was none. */
 export async function testConnection(
   connection: Connection,
-  model: string,
+  /** Omitted: one is picked from the service's model list. */
+  chosen?: string,
 ): Promise<TestResult> {
+  let model = chosen;
+  if (!model) {
+    try {
+      model = pickModel(connection.kind, await fetchModels(connection));
+    } catch (error) {
+      return {
+        ok: false,
+        error: `无法获取模型列表：${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (!model) return { ok: false, error: "这个服务没有列出任何可用的模型。" };
+  }
+
   const started = performance.now();
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS * 2);
   const done = (reply: string): TestResult => ({
     ok: true,
+    model: model,
     reply: reply.trim().slice(0, 200),
     latencyMs: Math.round(performance.now() - started),
   });
@@ -250,6 +285,29 @@ export async function modelLists(
       ...(entry.error ? { error: entry.error } : {}),
     };
   });
+}
+
+/**
+ * The model a new chat with this provider starts on: the one set on the
+ * provider, else one picked from the list the service gave.
+ */
+export async function defaultModel(
+  db: Database,
+  provider: Provider,
+  keys: KeyStore = keychain,
+): Promise<string> {
+  if (provider.model) return provider.model;
+  const list = (await modelLists(db, keys)).find(
+    (entry) => entry.providerId === provider.id,
+  );
+  const model = list && pickModel(provider.kind, list.models);
+  if (!model)
+    throw new Error(
+      list?.error
+        ? `无法获取「${provider.name}」的模型列表：${list.error}`
+        : `「${provider.name}」没有列出任何可用的模型。`,
+    );
+  return model;
 }
 
 /** Fetches every provider's list in the background, e.g. at startup. */

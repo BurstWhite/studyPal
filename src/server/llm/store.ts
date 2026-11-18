@@ -46,6 +46,7 @@ export interface Provider {
   kind: ProviderKind;
   /** Empty means the kind's default endpoint. */
   baseUrl: string;
+  /** The model new chats start on; empty means one is picked from its list. */
   model: string;
   isDefault: boolean;
 }
@@ -80,6 +81,23 @@ export const keychain: KeyStore = {
   },
 };
 
+/** What a provider is called when the user gives it no name. */
+function defaultName(kind: ProviderKind, baseUrl: string): string {
+  if (kind === "openai-compatible") {
+    try {
+      return new URL(baseUrl).hostname;
+    } catch {
+      return "OpenAI 兼容服务";
+    }
+  }
+  return {
+    anthropic: "Anthropic",
+    deepseek: "DeepSeek",
+    opencode: "OpenCode",
+    "opencode-go": "OpenCode Go",
+  }[kind];
+}
+
 export function parseProviderInput(
   body: unknown,
   creating: boolean,
@@ -95,8 +113,8 @@ export function parseProviderInput(
   if (!PROVIDER_KINDS.includes(kind as ProviderKind)) {
     throw new ProviderInputError("请选择服务类型");
   }
+  // Optional: chats pick their model from the service's own list.
   const model = field("model");
-  if (!model) throw new ProviderInputError("请填写模型名称");
 
   const baseUrl = field("baseUrl");
   if (kind === "openai-compatible" && !baseUrl) {
@@ -118,7 +136,7 @@ export function parseProviderInput(
   if (creating && !apiKey) throw new ProviderInputError("请填写 API key");
 
   return {
-    name: field("name") || model,
+    name: field("name") || model || defaultName(kind as ProviderKind, baseUrl),
     kind: kind as ProviderKind,
     baseUrl,
     model,
@@ -397,10 +415,14 @@ export async function openConversation(
       "找不到这个模型服务的 API key，请在设置里重新填写。",
     );
 
+  const model = chat.model || provider.model;
+  if (!model)
+    throw new ChatUnavailable("这段对话还没有选择模型，请在输入框旁选一个。");
+
   const settings = {
     apiKey,
     baseUrl: provider.baseUrl || DEFAULT_BASE_URL[provider.kind],
-    model: chat.model || provider.model,
+    model,
     fetch: fetchImpl,
   };
   const history = loadMessages(db, chat.id);
