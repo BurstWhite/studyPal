@@ -53,7 +53,7 @@ function isOfficial(baseUrl: string): boolean {
   }
 }
 
-function describeError(error: unknown): string {
+export function describeError(error: unknown): string {
   // Most specific first: each needs a different response from the user.
   if (error instanceof Anthropic.AuthenticationError)
     return "API key 无效，请在设置里检查。";
@@ -72,6 +72,20 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export function anthropicClient(
+  settings: Omit<AnthropicSettings, "model">,
+): Anthropic {
+  // Every credential and address is given explicitly: the SDK would
+  // otherwise pick up ANTHROPIC_* variables from the environment the app
+  // happens to be launched in, instead of what the user configured.
+  return new Anthropic({
+    apiKey: settings.apiKey,
+    authToken: null,
+    baseURL: settings.baseUrl || OFFICIAL_BASE_URL,
+    ...(settings.fetch ? { fetch: settings.fetch } : {}),
+  });
+}
+
 export class AnthropicConversation implements Conversation {
   private readonly client: Anthropic;
   private readonly history: MessageParam[];
@@ -83,15 +97,7 @@ export class AnthropicConversation implements Conversation {
   ) {
     this.history = history as MessageParam[];
     this.official = isOfficial(settings.baseUrl);
-    // Every credential and address is given explicitly: the SDK would
-    // otherwise pick up ANTHROPIC_* variables from the environment the app
-    // happens to be launched in, instead of what the user configured.
-    this.client = new Anthropic({
-      apiKey: settings.apiKey,
-      authToken: null,
-      baseURL: settings.baseUrl || OFFICIAL_BASE_URL,
-      ...(settings.fetch ? { fetch: settings.fetch } : {}),
-    });
+    this.client = anthropicClient(settings);
   }
 
   addUser(text: string, now: Date): void {

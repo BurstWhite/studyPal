@@ -8,8 +8,11 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState, type FormEvent } from "react";
+import { Check, Loader2, Plug, X } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import type { TestResult } from "../../server/llm/models";
 import type { Provider, ProviderKind } from "../../server/llm/store";
+import { cn } from "../../lib/utils";
 import { api, useQuery } from "../api";
 
 const KIND_LABEL: Record<ProviderKind, string> = {
@@ -46,6 +49,54 @@ const BASE_URL_HINT: Record<ProviderKind, string> = {
   "opencode-go": "https://opencode.ai/inference/go/openai/v1",
 };
 
+/** A connection test as shown: running, or how it went. */
+type TestState = "running" | TestResult | undefined;
+
+function TestOutcome({ state }: { state: TestState }) {
+  if (!state) return null;
+  if (state === "running")
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        正在发送测试消息…
+      </span>
+    );
+  return (
+    <span
+      role="status"
+      className={cn(
+        "inline-flex min-w-0 items-start gap-1.5 text-xs",
+        state.ok ? "text-primary" : "text-destructive",
+      )}
+    >
+      {state.ok ? (
+        <Check className="mt-px size-3.5 shrink-0" />
+      ) : (
+        <X className="mt-px size-3.5 shrink-0" />
+      )}
+      <span className="min-w-0 break-words">
+        {state.ok
+          ? `连接正常，${(state.latencyMs / 1000).toFixed(1)} 秒收到回复${state.reply ? `：「${state.reply}」` : ""}`
+          : state.error}
+      </span>
+    </span>
+  );
+}
+
+async function runTest(path: string, body?: unknown): Promise<TestResult> {
+  try {
+    return await api<TestResult>(path, {
+      method: "POST",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (reason) {
+    return {
+      ok: false,
+      error: reason instanceof Error ? reason.message : String(reason),
+    };
+  }
+}
+
 const selectClass =
   "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
@@ -57,6 +108,54 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
+  const [test, setTest] = useState<TestState>();
+  /** Models the service offers, once key and address are filled in. */
+  const [offered, setOffered] = useState<{
+    models: string[];
+    error?: string;
+  }>();
+
+  // An old result says nothing about settings that have since changed.
+  useEffect(() => setTest(undefined), [kind, baseUrl, model, apiKey]);
+
+  useEffect(() => {
+    setOffered(undefined);
+    if (!apiKey.trim() || (kind === "openai-compatible" && !baseUrl.trim()))
+      return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api<string[]>("/api/providers/models", {
+        method: "POST",
+        body: JSON.stringify({ kind, baseUrl, apiKey }),
+      })
+        .then((models) => !cancelled && setOffered({ models }))
+        .catch(
+          (reason: unknown) =>
+            !cancelled &&
+            setOffered({
+              models: [],
+              error: reason instanceof Error ? reason.message : String(reason),
+            }),
+        );
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [kind, baseUrl, apiKey]);
+
+  const testDraft = async () => {
+    setTest("running");
+    setTest(
+      await runTest("/api/providers/test", {
+        kind,
+        name,
+        baseUrl,
+        model,
+        apiKey,
+      }),
+    );
+  };
 
   const changeKind = (next: ProviderKind) => {
     // Swap the suggested model only if the user has not typed their own.
@@ -111,10 +210,28 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
           <Label htmlFor="provider-model">模型</Label>
           <Input
             id="provider-model"
+            list="provider-model-options"
             placeholder={MODEL_HINT[kind]}
             value={model}
             onChange={(event) => setModel(event.target.value)}
           />
+          <datalist id="provider-model-options">
+            {offered?.models.map((id) => (
+              <option key={id} value={id} />
+            ))}
+          </datalist>
+          {offered && (
+            <span
+              className={cn(
+                "text-xs",
+                offered.error ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {offered.error
+                ? `获取模型列表失败：${offered.error}`
+                : `已获取 ${offered.models.length} 个可用模型，可从输入框的下拉建议里选择`}
+            </span>
+          )}
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
@@ -154,9 +271,21 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
           {problem}
         </p>
       )}
-      <Button type="submit" disabled={busy} className="self-start">
-        添加
-      </Button>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" disabled={busy}>
+          添加
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={test === "running" || !apiKey.trim() || !model.trim()}
+          onClick={() => void testDraft()}
+        >
+          <Plug />
+          测试连接
+        </Button>
+        <TestOutcome state={test} />
+      </div>
     </form>
   );
 }
@@ -164,6 +293,13 @@ function AddProvider({ onAdded }: { onAdded: () => void }) {
 export function Providers() {
   const { data, error, reload } = useQuery<Provider[]>("/api/providers");
   const [problem, setProblem] = useState<string>();
+  const [tests, setTests] = useState<Record<number, TestState>>({});
+
+  const testSaved = async (id: number) => {
+    setTests((current) => ({ ...current, [id]: "running" }));
+    const result = await runTest(`/api/providers/${id}/test`);
+    setTests((current) => ({ ...current, [id]: result }));
+  };
 
   const run = async (path: string, method: string) => {
     setProblem(undefined);
@@ -193,44 +329,59 @@ export function Providers() {
         {data && data.length > 0 && (
           <ul className="divide-y rounded-xl border">
             {data.map((provider) => (
-              <li
-                key={provider.id}
-                className="flex items-center gap-3 px-3 py-2"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
-                    {provider.name}
-                    {provider.isDefault && (
-                      <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-xs font-normal">
-                        默认
-                      </span>
-                    )}
+              <li key={provider.id} className="px-3 py-2">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">
+                      {provider.name}
+                      {provider.isDefault && (
+                        <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-xs font-normal">
+                          默认
+                        </span>
+                      )}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {KIND_LABEL[provider.kind]} · {provider.model}
+                      {provider.baseUrl ? ` · ${provider.baseUrl}` : ""}
+                    </div>
                   </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {KIND_LABEL[provider.kind]} · {provider.model}
-                    {provider.baseUrl ? ` · ${provider.baseUrl}` : ""}
-                  </div>
-                </div>
-                {!provider.isDefault && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={tests[provider.id] === "running"}
+                    onClick={() => void testSaved(provider.id)}
+                  >
+                    测试
+                  </Button>
+                  {!provider.isDefault && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        void run(
+                          `/api/providers/${provider.id}/default`,
+                          "POST",
+                        )
+                      }
+                    >
+                      设为默认
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() =>
-                      void run(`/api/providers/${provider.id}/default`, "POST")
+                      void run(`/api/providers/${provider.id}`, "DELETE")
                     }
                   >
-                    设为默认
+                    删除
                   </Button>
+                </div>
+                {tests[provider.id] && (
+                  <div className="pt-1">
+                    <TestOutcome state={tests[provider.id]} />
+                  </div>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    void run(`/api/providers/${provider.id}`, "DELETE")
-                  }
-                >
-                  删除
-                </Button>
               </li>
             ))}
           </ul>

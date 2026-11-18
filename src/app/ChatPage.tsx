@@ -3,7 +3,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowUp,
   Check,
+  ChevronDown,
   Loader2,
+  RotateCcw,
   Plus,
   Sparkles,
   Trash2,
@@ -12,7 +14,8 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
-import type { ChatSummary, Provider } from "../server/llm/store";
+import type { ModelList } from "../server/llm/models";
+import type { ChatSummary, Provider, ProviderKind } from "../server/llm/store";
 import type { DisplayItem } from "../server/llm/turn";
 import type { StreamEvent } from "../server/routes/chat";
 import { DECLINED_MESSAGE } from "../shared/chat";
@@ -170,19 +173,174 @@ function ToolRow({
   );
 }
 
+/**
+ * Whether a chat's stored history can be replayed to another provider: every
+ * kind but Anthropic speaks the OpenAI chat-completions format.
+ */
+const sameWireFormat = (a: ProviderKind | undefined, b: ProviderKind) =>
+  a !== undefined && (a === "anthropic") === (b === "anthropic");
+
+/** A provider and one of its models, as chosen in the picker. */
+export interface ModelChoice {
+  providerId: number;
+  model: string;
+}
+
+const choiceKey = (choice: ModelChoice) =>
+  `${choice.providerId}:${choice.model}`;
+
+/** The model a chat talks to: its own choice, else its provider's default. */
+function currentModel(
+  chat: ChatSummary,
+  providers: Provider[],
+): string | undefined {
+  return (
+    chat.model ??
+    providers.find((provider) => provider.id === chat.providerId)?.model
+  );
+}
+
+/** Every model of every provider, grouped by provider. */
+function ModelPicker({
+  providers,
+  lists,
+  value,
+  disabled,
+  onChange,
+}: {
+  providers: Provider[];
+  lists: ModelList[] | undefined;
+  value: ModelChoice | undefined;
+  disabled: boolean;
+  onChange: (choice: ModelChoice) => void;
+}) {
+  const options = providers.map((provider) => {
+    const list = lists?.find((entry) => entry.providerId === provider.id);
+    // The configured model, and the one in use, are always offered even if
+    // the service does not list them (or the list could not be fetched).
+    const models = [...(list?.models ?? [])];
+    for (const extra of [
+      provider.model,
+      value?.providerId === provider.id ? value.model : undefined,
+    ]) {
+      if (extra && !models.includes(extra)) models.unshift(extra);
+    }
+    return { provider, models, error: list?.error };
+  });
+
+  return (
+    <div className="relative inline-flex items-center">
+      <select
+        aria-label="对话使用的模型"
+        className="h-8 max-w-[22rem] appearance-none truncate rounded-lg border bg-card py-0 pl-3 pr-8 text-sm font-medium outline-none hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60"
+        disabled={disabled}
+        value={value ? choiceKey(value) : ""}
+        onChange={(event) => {
+          const [id, ...rest] = event.target.value.split(":");
+          onChange({ providerId: Number(id), model: rest.join(":") });
+        }}
+      >
+        {!value && <option value="">选择模型</option>}
+        {options.map(({ provider, models, error }) => (
+          <optgroup
+            key={provider.id}
+            label={
+              error ? `${provider.name}（模型列表获取失败）` : provider.name
+            }
+          >
+            {models.map((model) => (
+              <option
+                key={model}
+                value={choiceKey({ providerId: provider.id, model })}
+              >
+                {model}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 size-4 text-muted-foreground" />
+      {!lists && (
+        <Loader2
+          aria-label="正在获取模型列表"
+          className="ml-2 size-3.5 animate-spin text-muted-foreground"
+        />
+      )}
+    </div>
+  );
+}
+
+/** Asks what to do with the conversation so far before changing model. */
+function SwitchPrompt({
+  from,
+  to,
+  canKeep,
+  onReset,
+  onKeep,
+  onCancel,
+}: {
+  from: string | undefined;
+  to: string;
+  canKeep: boolean;
+  onReset: () => void;
+  onKeep: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      role="alertdialog"
+      aria-label="切换模型"
+      className="rounded-xl border border-primary/40 bg-secondary/60 px-4 py-3 text-sm"
+    >
+      <p className="font-medium">
+        切换到 {to}
+        {from ? `（当前是 ${from}）` : ""}
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        {canKeep
+          ? "建议重置上下文：会开一个新对话让新模型从头开始，这段对话仍保留在左侧列表里。也可以把现有上下文交给新模型继续，但前面的回复是别的模型写的，效果可能不稳定。"
+          : "这个模型使用另一种消息格式，读不了这段对话的上下文，只能重置：会开一个新对话，这段对话仍保留在左侧列表里。"}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" onClick={onReset}>
+          <RotateCcw />
+          重置上下文并切换
+        </Button>
+        {canKeep && (
+          <Button size="sm" variant="outline" onClick={onKeep}>
+            保留上下文切换
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          取消
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function Conversation({
   chatId,
+  providers,
+  modelLists,
   initialMessage,
   onTurnFinished,
+  onReset,
 }: {
   chatId: number;
+  providers: Provider[];
+  modelLists: ModelList[] | undefined;
   /** Sent automatically once the conversation has loaded. */
   initialMessage?: string;
   onTurnFinished: () => void;
+  /** Starts a new chat with the given model, leaving this one as it is. */
+  onReset: (choice: ModelChoice) => void;
 }) {
   const { data, error } = useQuery<{ chat: ChatSummary; items: DisplayItem[] }>(
     `/api/chats/${chatId}`,
   );
+  const [chat, setChat] = useState<ChatSummary>();
+  const [pendingSwitch, setPendingSwitch] = useState<ModelChoice>();
   const [items, setItems] = useState<LiveItem[]>([]);
   const [draft, setDraft] = useState("");
   const [running, setRunning] = useState(false);
@@ -191,8 +349,41 @@ function Conversation({
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (data) setItems(data.items);
+    if (data) {
+      setItems(data.items);
+      setChat(data.chat);
+    }
   }, [data]);
+
+  const activeModel = chat && currentModel(chat, providers);
+  const activeChoice: ModelChoice | undefined =
+    chat?.providerId != null && activeModel
+      ? { providerId: chat.providerId, model: activeModel }
+      : undefined;
+  const providerOf = (id: number) =>
+    providers.find((provider) => provider.id === id);
+
+  const applySwitch = async (choice: ModelChoice) => {
+    setPendingSwitch(undefined);
+    setProblem(undefined);
+    try {
+      const result = await api<{ chat: ChatSummary }>(`/api/chats/${chatId}`, {
+        method: "PATCH",
+        body: JSON.stringify(choice),
+      });
+      setChat(result.chat);
+      onTurnFinished();
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  const chooseModel = (choice: ModelChoice) => {
+    if (activeChoice && choiceKey(choice) === choiceKey(activeChoice)) return;
+    // Nothing said yet: there is no context to lose.
+    if (items.length === 0) void applySwitch(choice);
+    else setPendingSwitch(choice);
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -323,10 +514,19 @@ function Conversation({
     }
   };
 
-  const unavailable = data?.chat.providerId === null;
+  const unavailable = chat?.providerId === null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-2 border-b px-8 py-2.5">
+        <ModelPicker
+          providers={providers}
+          lists={modelLists}
+          value={pendingSwitch ?? activeChoice}
+          disabled={!chat || running}
+          onChange={chooseModel}
+        />
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
         <div className="mx-auto flex max-w-3xl flex-col gap-3">
           {error && (
@@ -390,9 +590,25 @@ function Conversation({
               {problem}
             </p>
           )}
+          {pendingSwitch && chat && (
+            <SwitchPrompt
+              from={activeModel}
+              to={pendingSwitch.model}
+              canKeep={sameWireFormat(
+                providerOf(pendingSwitch.providerId)?.kind,
+                chat.kind,
+              )}
+              onReset={() => {
+                setPendingSwitch(undefined);
+                onReset(pendingSwitch);
+              }}
+              onKeep={() => void applySwitch(pendingSwitch)}
+              onCancel={() => setPendingSwitch(undefined)}
+            />
+          )}
           {unavailable ? (
             <p className="text-sm text-muted-foreground">
-              这段对话使用的模型服务已被删除，只能查看。请新建对话继续。
+              这段对话使用的模型服务已被删除，只能查看。请新建对话，或在上方换一个模型继续。
             </p>
           ) : (
             <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 pl-1 transition-colors focus-within:border-primary/50">
@@ -425,8 +641,9 @@ function Conversation({
 export function ChatPage() {
   const providers = useQuery<Provider[]>("/api/providers");
   const chats = useQuery<ChatSummary[]>("/api/chats");
+  // The server keeps these warm in the background; this only reads them.
+  const modelLists = useQuery<ModelList[]>("/api/models");
   const [activeId, setActiveId] = useState<number>();
-  const [providerId, setProviderId] = useState<number>();
   const [problem, setProblem] = useState<string>();
   /** A message handed over by another page, and the chat created to send it. */
   const [handoff, setHandoff] = useState<{ text: string; chatId?: number }>();
@@ -440,9 +657,23 @@ export function ChatPage() {
   const defaultProvider =
     providers.data?.find((provider) => provider.isDefault) ??
     providers.data?.[0];
-  const chosenProvider =
-    providers.data?.find((provider) => provider.id === providerId) ??
-    defaultProvider;
+  // A new chat starts on the model of the chat in view, else the default.
+  const activeChat = chats.data?.find((chat) => chat.id === activeId);
+  const activeProvider =
+    activeChat?.providerId != null
+      ? providers.data?.find(
+          (provider) => provider.id === activeChat.providerId,
+        )
+      : undefined;
+  const nextChoice: ModelChoice | undefined = activeProvider
+    ? {
+        providerId: activeProvider.id,
+        model: activeChat?.model ?? activeProvider.model,
+      }
+    : defaultProvider && {
+        providerId: defaultProvider.id,
+        model: defaultProvider.model,
+      };
 
   // Open the most recent chat when the page loads, unless a handed-over
   // message is about to start a new one.
@@ -475,13 +706,13 @@ export function ChatPage() {
       );
   }, [handoff, defaultProvider]);
 
-  const create = async () => {
-    if (!chosenProvider) return;
+  const create = async (choice = nextChoice) => {
+    if (!choice) return;
     setProblem(undefined);
     try {
       const { id } = await api<{ id: number }>("/api/chats", {
         method: "POST",
-        body: JSON.stringify({ providerId: chosenProvider.id }),
+        body: JSON.stringify(choice),
       });
       setActiveId(id);
       chats.reload();
@@ -512,23 +743,9 @@ export function ChatPage() {
           <h1 className="px-1 pb-1 text-[22px] font-semibold tracking-tight">
             对话
           </h1>
-          {providers.data && providers.data.length > 1 && (
-            <select
-              aria-label="新对话使用的模型服务"
-              className="h-8 w-full rounded-lg border bg-card px-2 text-xs"
-              value={chosenProvider?.id}
-              onChange={(event) => setProviderId(Number(event.target.value))}
-            >
-              {providers.data.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
-          )}
           <Button
             size="sm"
-            disabled={!chosenProvider}
+            disabled={!nextChoice}
             onClick={() => void create()}
           >
             <Plus />
@@ -578,10 +795,13 @@ export function ChatPage() {
             </a>
             里添加一个（需要 API key），再回来开始对话。
           </div>
-        ) : activeId !== undefined ? (
+        ) : activeId !== undefined && providers.data ? (
           <Conversation
             key={activeId}
             chatId={activeId}
+            providers={providers.data}
+            modelLists={modelLists.data}
+            onReset={(choice) => void create(choice)}
             initialMessage={
               handoff?.chatId === activeId ? handoff.text : undefined
             }

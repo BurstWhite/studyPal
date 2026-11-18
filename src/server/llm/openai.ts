@@ -46,7 +46,7 @@ const CONTEXT_SEPARATOR = "\n\n---\n\n";
 /** Tool failures are flagged in the text; the protocol has no error field. */
 const ERROR_PREFIX = "ERROR: ";
 
-function describeStatus(status: number, body: string): string {
+export function describeStatus(status: number, body: string): string {
   let detail = body.slice(0, 300);
   try {
     const parsed = JSON.parse(body) as {

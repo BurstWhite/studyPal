@@ -17,9 +17,20 @@ import {
   openConversation,
   parseProviderInput,
   ProviderInputError,
+  PROVIDER_KINDS,
+  setChatModel,
   setDefaultProvider,
   updateProvider,
+  keychain,
+  type ProviderKind,
 } from "../llm/store";
+import {
+  fetchModels,
+  forgetModels,
+  modelLists,
+  testConnection,
+  warmModelLists,
+} from "../llm/models";
 import { TOOLS } from "../llm/tools";
 import {
   runTurn,
@@ -154,6 +165,7 @@ export const chatRoutes = {
           getDb(),
           parseProviderInput(await readJson(req), true),
         );
+        warmModelLists(getDb());
         return Response.json({ id }, { status: 201 });
       } catch (error) {
         if (error instanceof ProviderInputError) return bad(error.message);
@@ -172,7 +184,10 @@ export const chatRoutes = {
           id,
           parseProviderInput(await readJson(req), false),
         );
-        return found ? Response.json({ ok: true }) : bad("模型服务不存在", 404);
+        if (!found) return bad("模型服务不存在", 404);
+        forgetModels(id);
+        warmModelLists(getDb());
+        return Response.json({ ok: true });
       } catch (error) {
         if (error instanceof ProviderInputError) return bad(error.message);
         throw error;
@@ -181,10 +196,66 @@ export const chatRoutes = {
     DELETE: guarded(async (req: ProviderRequest) => {
       const id = parseId(req.params.id);
       if (id === undefined) return bad("无效的编号");
-      return (await deleteProvider(getDb(), id))
-        ? Response.json({ ok: true })
-        : bad("模型服务不存在", 404);
+      if (!(await deleteProvider(getDb(), id)))
+        return bad("模型服务不存在", 404);
+      forgetModels(id);
+      return Response.json({ ok: true });
     }),
+  },
+
+  /** Sends one short message with settings that have not been saved yet. */
+  "/api/providers/test": {
+    POST: guarded(async (req: Request) => {
+      try {
+        const input = parseProviderInput(await readJson(req), true);
+        return Response.json(await testConnection(input, input.model));
+      } catch (error) {
+        if (error instanceof ProviderInputError) return bad(error.message);
+        throw error;
+      }
+    }),
+  },
+
+  /** The models a provider being added offers, to suggest in the form. */
+  "/api/providers/models": {
+    POST: guarded(async (req: Request) => {
+      const body = await readJson(req);
+      const kind = body.kind as ProviderKind;
+      const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+      const baseUrl =
+        typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+      if (!PROVIDER_KINDS.includes(kind)) return bad("请选择服务类型");
+      if (!apiKey) return bad("请填写 API key");
+      if (kind === "openai-compatible" && !baseUrl)
+        return bad("OpenAI 兼容服务需要填写 Base URL");
+      try {
+        return Response.json(await fetchModels({ kind, baseUrl, apiKey }));
+      } catch (error) {
+        return bad(error instanceof Error ? error.message : String(error), 502);
+      }
+    }),
+  },
+
+  "/api/providers/:id/test": {
+    POST: guarded(async (req: Bun.BunRequest<"/api/providers/:id/test">) => {
+      const id = parseId(req.params.id);
+      const provider = id === undefined ? undefined : getProvider(getDb(), id);
+      if (!provider) return bad("模型服务不存在", 404);
+      const apiKey = await keychain.get(provider.id);
+      if (!apiKey)
+        return Response.json({
+          ok: false,
+          error: "找不到这个模型服务的 API key，请删除后重新添加。",
+        });
+      return Response.json(
+        await testConnection({ ...provider, apiKey }, provider.model),
+      );
+    }),
+  },
+
+  /** Every provider's models, fetched from the provider and cached. */
+  "/api/models": {
+    GET: guarded(async () => Response.json(await modelLists(getDb()))),
   },
 
   "/api/providers/:id/default": {
@@ -205,8 +276,9 @@ export const chatRoutes = {
           ? getProvider(getDb(), body.providerId)
           : undefined;
       if (!provider) return bad("请先选择一个模型服务");
+      const model = typeof body.model === "string" ? body.model.trim() : "";
       return Response.json(
-        { id: createChat(getDb(), provider) },
+        { id: createChat(getDb(), provider, model || null) },
         { status: 201 },
       );
     }),
@@ -221,6 +293,27 @@ export const chatRoutes = {
         chat,
         items: displayMessages(chat.kind, loadMessages(getDb(), chat.id)),
       });
+    }),
+    /** Switches the provider or model the chat talks to from now on. */
+    PATCH: guarded(async (req: ChatRequest) => {
+      const id = parseId(req.params.id);
+      if (id === undefined) return bad("对话不存在", 404);
+      if (runningChats.has(id)) return bad("上一条消息还在处理中", 409);
+      const body = await readJson(req);
+      const provider =
+        typeof body.providerId === "number"
+          ? getProvider(getDb(), body.providerId)
+          : undefined;
+      if (!provider) return bad("模型服务不存在", 404);
+      const model = typeof body.model === "string" ? body.model.trim() : "";
+      const outcome = setChatModel(getDb(), id, provider, model || null);
+      if (outcome === "missing") return bad("对话不存在", 404);
+      if (outcome === "incompatible")
+        return bad(
+          "这个模型使用另一种消息格式，需要重置上下文后才能切换。",
+          409,
+        );
+      return Response.json({ chat: getChat(getDb(), id) });
     }),
     DELETE: guarded((req: ChatRequest) => {
       const id = parseId(req.params.id);

@@ -131,6 +131,10 @@ const migrations: string[] = [
   ALTER TABLE assignments ADD COLUMN reminders TEXT;
   ALTER TABLE study_blocks ADD COLUMN reminders TEXT;
   `,
+  `
+  -- The model a chat talks to; NULL means its provider's default model.
+  ALTER TABLE chats ADD COLUMN model TEXT;
+  `,
 ];
 
 export function migrate(db: Database): number {

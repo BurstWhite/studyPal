@@ -3,6 +3,7 @@ import index from "./index.html";
 import { handleAuth } from "./server/auth";
 import { config } from "./server/config";
 import { getDb } from "./server/db";
+import { warmModelLists } from "./server/llm/models";
 import { assignmentRoutes } from "./server/routes/assignments";
 import { chatRoutes } from "./server/routes/chat";
 import { eventRoutes } from "./server/routes/events";
@@ -61,6 +62,9 @@ const sync = () =>
 if (process.env.STUDYPAL_NO_BACKGROUND !== "1") {
   setInterval(() => void sync(), SYNC_INTERVAL_MS).unref();
   void sync();
+  // Ask each model service which models it offers, so the chat's model
+  // picker is filled before it is first opened.
+  warmModelLists(getDb());
 }
 
 console.log(`studyPal server listening on ${server.url}`);

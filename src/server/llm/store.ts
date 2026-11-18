@@ -33,9 +33,9 @@ export const DEFAULT_BASE_URL: Record<ProviderKind, string> = {
 };
 
 /** How studyPal identifies itself; OpenCode asks clients not to use a generic one. */
-const USER_AGENT = "studyPal/0.1.0";
+export const USER_AGENT = "studyPal/0.1.0";
 
-const isOpenCode = (kind: ProviderKind) =>
+export const isOpenCode = (kind: ProviderKind) =>
   kind === "opencode" || kind === "opencode-go";
 
 const usesAnthropicFormat = (kind: ProviderKind) => kind === "anthropic";
@@ -235,6 +235,8 @@ export interface ChatSummary {
   /** Null when the provider it used has been removed. */
   providerId: number | null;
   kind: ProviderKind;
+  /** Null means the provider's default model. */
+  model: string | null;
   updatedAt: string;
 }
 
@@ -243,6 +245,7 @@ interface ChatRow {
   title: string;
   provider_id: number | null;
   kind: ProviderKind;
+  model: string | null;
   updated_at: string;
 }
 
@@ -251,13 +254,14 @@ const toChat = (row: ChatRow): ChatSummary => ({
   title: row.title,
   providerId: row.provider_id,
   kind: row.kind,
+  model: row.model,
   updatedAt: row.updated_at,
 });
 
 export function listChats(db: Database): ChatSummary[] {
   const rows = db
     .query(
-      "SELECT id, title, provider_id, kind, updated_at FROM chats ORDER BY updated_at DESC, id DESC",
+      "SELECT id, title, provider_id, kind, model, updated_at FROM chats ORDER BY updated_at DESC, id DESC",
     )
     .all() as ChatRow[];
   return rows.map(toChat);
@@ -266,7 +270,7 @@ export function listChats(db: Database): ChatSummary[] {
 export function getChat(db: Database, id: number): ChatSummary | undefined {
   const row = db
     .query(
-      "SELECT id, title, provider_id, kind, updated_at FROM chats WHERE id = ?",
+      "SELECT id, title, provider_id, kind, model, updated_at FROM chats WHERE id = ?",
     )
     .get(id) as ChatRow | null;
   return row ? toChat(row) : undefined;
@@ -276,13 +280,40 @@ export function getChat(db: Database, id: number): ChatSummary | undefined {
  * A chat keeps the wire format of the provider it started with, because its
  * stored messages are replayed to the model exactly as they were exchanged.
  */
-export function createChat(db: Database, provider: Provider): number {
+export function createChat(
+  db: Database,
+  provider: Provider,
+  model: string | null = null,
+): number {
   const result = db
     .query(
-      "INSERT INTO chats (provider_id, kind, session_key) VALUES (?, ?, ?)",
+      "INSERT INTO chats (provider_id, kind, model, session_key) VALUES (?, ?, ?, ?)",
     )
-    .run(provider.id, provider.kind, crypto.randomUUID());
+    .run(provider.id, provider.kind, model || null, crypto.randomUUID());
   return Number(result.lastInsertRowid);
+}
+
+/**
+ * Points a chat at another provider or model. Its history stays, so a chat
+ * that already has messages can only move within the same wire format.
+ */
+export function setChatModel(
+  db: Database,
+  chatId: number,
+  provider: Provider,
+  model: string | null,
+): "ok" | "missing" | "incompatible" {
+  const chat = getChat(db, chatId);
+  if (!chat) return "missing";
+  if (
+    usesAnthropicFormat(provider.kind) !== usesAnthropicFormat(chat.kind) &&
+    loadMessages(db, chatId).length > 0
+  )
+    return "incompatible";
+  db.query(
+    "UPDATE chats SET provider_id = ?, kind = ?, model = ? WHERE id = ?",
+  ).run(provider.id, provider.kind, model || null, chatId);
+  return "ok";
 }
 
 export function deleteChat(db: Database, id: number): boolean {
@@ -369,7 +400,7 @@ export async function openConversation(
   const settings = {
     apiKey,
     baseUrl: provider.baseUrl || DEFAULT_BASE_URL[provider.kind],
-    model: provider.model,
+    model: chat.model || provider.model,
     fetch: fetchImpl,
   };
   const history = loadMessages(db, chat.id);
