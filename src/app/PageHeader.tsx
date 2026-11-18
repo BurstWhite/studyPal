@@ -130,7 +130,9 @@ export function Ring({
       aria-valuemax={total}
       aria-valuenow={done}
       aria-valuetext={`${done} / ${total}`}
-      className="relative grid place-items-center"
+      // The track is drawn at a fixed size; letting flex shrink the box would
+      // leave the ring spilling over whatever sits beside it.
+      className="relative grid shrink-0 place-items-center"
       style={{ width: size, height: size }}
     >
       <svg width={size} height={size} className="absolute inset-0 -rotate-90">
