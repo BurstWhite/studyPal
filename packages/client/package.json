@@ -1,0 +1,16 @@
+{
+  "name": "@studypal/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "studyPal's UI-independent client logic, shared by the desktop web view and the phone app: API calls, live chat streaming, calendar layout.",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@studypal/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  }
+}

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { handleAuth, isAuthorized, isLocalHost } from "./auth";
-import { migrate, openDatabase } from "./db";
-import { readOverview } from "./routes/system";
+import { guardAll, handleAuth, isAuthorized, isLocalHost } from "./auth";
+import { migrate } from "@studypal/core/db";
+import { readOverview } from "@studypal/core/routes/system";
+import { openDatabase } from "./platform";
 
 function request(url: string, headers: Record<string, string> = {}): Request {
   return new Request(url, {
@@ -117,5 +118,34 @@ describe("auth", () => {
     );
     expect(bad.status).toBe(403);
     expect(bad.headers.get("set-cookie")).toBeNull();
+  });
+});
+
+describe("guardAll", () => {
+  const routes = guardAll(
+    {
+      "/api/health": { GET: (_req: Request) => Response.json("up") },
+      "/api/events": { GET: (_req: Request) => Response.json("events") },
+    },
+    "secret",
+  );
+
+  test("every route but the health probe needs the session cookie", async () => {
+    const health = await routes["/api/health"].GET(
+      request("http://127.0.0.1:47821/api/health"),
+    );
+    expect(health.status).toBe(200);
+
+    const anonymous = await routes["/api/events"].GET(
+      request("http://127.0.0.1:47821/api/events"),
+    );
+    expect(anonymous.status).toBe(401);
+
+    const signedIn = await routes["/api/events"].GET(
+      request("http://127.0.0.1:47821/api/events", {
+        cookie: "studypal_session=secret",
+      }),
+    );
+    expect(signedIn.status).toBe(200);
   });
 });

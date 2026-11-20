@@ -5,7 +5,7 @@ import type {
   TokenWindows,
 } from "../../server/usage/logs";
 import { cn } from "../../lib/utils";
-import { useQuery } from "../api";
+import { useQuery } from "@studypal/client/api";
 
 /** Compact token counts: 950, 12.9K, 4.2M. */
 export function formatTokens(value: number): string {

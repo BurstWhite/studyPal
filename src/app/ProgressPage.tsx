@@ -1,6 +1,6 @@
-import type { Progress, ProgressAssignment } from "../server/routes/study";
+import type { Progress, ProgressAssignment } from "@studypal/core/routes/study";
 import { cn } from "../lib/utils";
-import { useQuery } from "./api";
+import { useQuery } from "@studypal/client/api";
 import { Chip, EmptyNote, PageHeader, Panel, Ring } from "./PageHeader";
 import { UsagePanel } from "./usage/UsagePanel";
 

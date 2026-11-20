@@ -9,10 +9,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState, type FormEvent } from "react";
-import type { SystemCalendarStatus } from "../server/calendar/system";
-import type { AccountStatus, SyncLogEntry } from "../server/routes/zju";
-import type { SyncResult } from "../server/zju/sync";
-import { api, useQuery } from "./api";
+import type { SystemCalendarStatus } from "@studypal/core/calendar/system";
+import type { AccountStatus, SyncLogEntry } from "@studypal/core/routes/zju";
+import type { SyncResult } from "@studypal/core/zju/sync";
+import { api, useQuery } from "@studypal/client/api";
 import { PageHeader } from "./PageHeader";
 import { Appearance } from "./settings/Appearance";
 import { ClaudeBridge } from "./settings/ClaudeBridge";

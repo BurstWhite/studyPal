@@ -2,9 +2,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { StudyBlock } from "../../server/routes/study";
-import { api } from "../api";
-import { fromDateTimeInput, toDateTimeInput, toLocalIso } from "./dates";
+import type { StudyBlock } from "@studypal/core/routes/study";
+import { api } from "@studypal/client/api";
+import {
+  fromDateTimeInput,
+  toDateTimeInput,
+  toLocalIso,
+} from "@studypal/client/calendar/dates";
 
 const fieldClass =
   "h-9 w-full rounded-lg border border-input bg-card px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";

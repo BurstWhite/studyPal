@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "studyPal",
+    "slug": "studypal",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "studypal",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "app.studypal.mobile",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#f3f6f4",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 96,
+          "dark": {
+            "backgroundColor": "#111614"
+          }
+        }
+      ],
+      "expo-sqlite",
+      "expo-secure-store",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "studyPal 把课程、考试和作业截止时间写进系统日历，提醒由日历发出。"
+        }
+      ],
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "platforms": [
+      "ios"
+    ]
+  }
+}

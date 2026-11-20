@@ -3,24 +3,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { CalendarEntry } from "../../server/calendar/store";
-import { api } from "../api";
+import type { CalendarEntry } from "@studypal/core/calendar/store";
+import { api } from "@studypal/client/api";
 import {
   addDays,
   fromDateInput,
   fromDateTimeInput,
   toDateInput,
   toDateTimeInput,
-  toLocalIso,
-} from "./dates";
-
-type Repeat = "none" | "daily" | "weekly" | "biweekly";
-
-const REPEAT_RULES: Record<Exclude<Repeat, "none">, string> = {
-  daily: "FREQ=DAILY",
-  weekly: "FREQ=WEEKLY",
-  biweekly: "FREQ=WEEKLY;INTERVAL=2",
-};
+} from "@studypal/client/calendar/dates";
+import {
+  eventRequestBody,
+  readRepeat,
+  type Repeat,
+} from "@studypal/client/calendar/eventForm";
 
 interface FormState {
   title: string;
@@ -39,21 +35,12 @@ interface FormState {
 export type DialogTarget =
   { kind: "new"; start: Date } | { kind: "edit"; entry: CalendarEntry };
 
-function readRepeat(rrule: string | null): { repeat: Repeat; until: string } {
-  if (!rrule) return { repeat: "none", until: "" };
-  const interval = /INTERVAL=(\d+)/.exec(rrule)?.[1] ?? "1";
-  const repeat: Repeat = rrule.includes("FREQ=DAILY")
-    ? "daily"
-    : interval === "2"
-      ? "biweekly"
-      : "weekly";
-  const match = /UNTIL=(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/.exec(
-    rrule,
-  );
-  if (!match) return { repeat, until: "" };
-  const [, y, mo, d, h, mi, s] = match;
-  const until = new Date(Date.UTC(+y!, +mo! - 1, +d!, +h!, +mi!, +s!));
-  return { repeat, until: toDateInput(until) };
+function readRepeatForm(rrule: string | null): {
+  repeat: Repeat;
+  until: string;
+} {
+  const { repeat, until } = readRepeat(rrule);
+  return { repeat, until: until ? toDateInput(until) : "" };
 }
 
 function initialState(target: DialogTarget): FormState {
@@ -81,51 +68,23 @@ function initialState(target: DialogTarget): FormState {
     start: entry.allDay ? toDateInput(start) : toDateTimeInput(start),
     // All-day events are stored with an exclusive end; show the last day.
     end: entry.allDay ? toDateInput(addDays(end, -1)) : toDateTimeInput(end),
-    ...readRepeat(entry.series.rrule),
+    ...readRepeatForm(entry.series.rrule),
   };
-}
-
-function utcStamp(date: Date): string {
-  return date
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}Z$/, "Z");
 }
 
 /** Turns the form into an API request body, or returns a message to show. */
 function toRequest(form: FormState): { body: object } | { problem: string } {
   if (!form.title.trim()) return { problem: "请填写标题" };
-
   const parse = form.allDay ? fromDateInput : fromDateTimeInput;
   const start = parse(form.start);
-  let end = parse(form.end);
+  const end = parse(form.end);
   if (!start || !end) return { problem: "请填写开始和结束时间" };
-  if (form.allDay) end = addDays(end, 1);
-  if (end <= start) return { problem: "结束时间必须晚于开始时间" };
-
-  let rrule: string | null = null;
-  if (form.repeat !== "none") {
-    rrule = REPEAT_RULES[form.repeat];
-    if (form.until) {
-      const lastDay = fromDateInput(form.until);
-      if (!lastDay) return { problem: "重复截止日期无效" };
-      const until = new Date(addDays(lastDay, 1).getTime() - 1000);
-      if (until < start) return { problem: "重复截止日期不能早于开始时间" };
-      rrule += `;UNTIL=${utcStamp(until)}`;
-    }
+  let lastDay: Date | null = null;
+  if (form.repeat !== "none" && form.until) {
+    lastDay = fromDateInput(form.until) ?? null;
+    if (!lastDay) return { problem: "重复截止日期无效" };
   }
-
-  return {
-    body: {
-      title: form.title,
-      location: form.location,
-      notes: form.notes,
-      allDay: form.allDay,
-      startsAt: toLocalIso(start),
-      endsAt: toLocalIso(end),
-      rrule,
-    },
-  };
+  return eventRequestBody({ ...form, start, end, lastDay });
 }
 
 const fieldClass =
