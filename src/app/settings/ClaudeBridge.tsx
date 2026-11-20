@@ -9,7 +9,7 @@ import {
 import { useState } from "react";
 import type { UsageReport } from "../../server/routes/usage";
 import type { BridgePreview } from "../../server/usage/bridge";
-import { api, useQuery } from "../api";
+import { api, useQuery } from "@studypal/client/api";
 
 function Code({ children }: { children: string }) {
   return (

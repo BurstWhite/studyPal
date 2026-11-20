@@ -1,10 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CalendarEntry } from "../server/calendar/store";
-import type { StudyBlock } from "../server/routes/study";
+import type { CalendarEntry } from "@studypal/core/calendar/store";
+import type { StudyBlock } from "@studypal/core/routes/study";
 import { cn } from "../lib/utils";
-import { useQuery } from "./api";
+import { useQuery } from "@studypal/client/api";
 import {
   addDays,
   formatRange,
@@ -12,11 +12,11 @@ import {
   isSameDay,
   startOfWeek,
   weekdayLabel,
-} from "./calendar/dates";
+} from "@studypal/client/calendar/dates";
 import { BlockDialog } from "./calendar/BlockDialog";
 import { ClearDialog } from "./calendar/ClearDialog";
 import { EventDialog, type DialogTarget } from "./calendar/EventDialog";
-import { allDayEntries, placeDay } from "./calendar/layout";
+import { allDayEntries, placeDay } from "@studypal/client/calendar/layout";
 import { PageHeader } from "./PageHeader";
 
 const HOUR_HEIGHT = 54;

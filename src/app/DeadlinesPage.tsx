@@ -17,53 +17,19 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import type {
   Assignment,
   AssignmentStatus,
-} from "../server/routes/assignments";
+} from "@studypal/core/routes/assignments";
 import { cn } from "../lib/utils";
-import { api, useQuery } from "./api";
-import { fromDateTimeInput } from "./calendar/dates";
-import { planPrompt, queuePrompt } from "./chat/pendingPrompt";
+import { api, useQuery } from "@studypal/client/api";
+import {
+  assignmentLists,
+  describeRemaining,
+  formatDue,
+  matchesQuery,
+  remainingTone,
+} from "@studypal/client/assignments";
+import { fromDateTimeInput } from "@studypal/client/calendar/dates";
+import { planPrompt, queuePrompt } from "@studypal/client/chat/pendingPrompt";
 import { Chip, EmptyNote, PageHeader } from "./PageHeader";
-
-const HOUR_MS = 3_600_000;
-
-/** How far away a deadline is, in words. */
-export function describeRemaining(
-  dueAt: string,
-  now: Date,
-): { text: string; urgent: boolean } {
-  const remaining = new Date(dueAt).getTime() - now.getTime();
-  if (remaining <= 0) return { text: "已截止", urgent: true };
-  const hours = remaining / HOUR_MS;
-  if (hours < 1)
-    return {
-      text: `还剩 ${Math.max(1, Math.round(hours * 60))} 分钟`,
-      urgent: true,
-    };
-  if (hours < 48)
-    return { text: `还剩 ${Math.round(hours)} 小时`, urgent: hours <= 24 };
-  return { text: `还剩 ${Math.floor(hours / 24)} 天`, urgent: false };
-}
-
-/** Pill color for a deadline: red when urgent, amber within a week. */
-export function remainingTone(
-  dueAt: string,
-  now: Date,
-): "danger" | "warn" | "neutral" {
-  if (describeRemaining(dueAt, now).urgent) return "danger";
-  const days = (new Date(dueAt).getTime() - now.getTime()) / (24 * HOUR_MS);
-  return days <= 7 ? "warn" : "neutral";
-}
-
-function formatDue(dueAt: string): string {
-  return new Date(dueAt).toLocaleString("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
 
 function Row({
   item,
@@ -319,8 +285,6 @@ function AddForm({
 
 type Filter = "open" | "week" | "done" | "dismissed";
 
-const WEEK_MS = 7 * 24 * HOUR_MS;
-
 /** A titled group of rows inside the list. */
 function Group({
   icon: Icon,
@@ -378,17 +342,9 @@ export function DeadlinesPage() {
 
   const now = Date.now();
   const needle = query.trim().toLowerCase();
-  const matches = (item: Assignment) =>
-    !needle ||
-    item.title.toLowerCase().includes(needle) ||
-    (item.course ?? "").toLowerCase().includes(needle);
-  const all = data ?? [];
-  const due = (item: Assignment) =>
-    item.dueAt === null ? Infinity : new Date(item.dueAt).getTime();
-  const open = all.filter((item) => item.status === "open");
-  const thisWeek = open.filter((item) => due(item) - now <= WEEK_MS);
-  const done = all.filter((item) => item.status === "done");
-  const dismissed = all.filter((item) => item.status === "dismissed");
+  const matches = (item: Assignment) => matchesQuery(item, query);
+  const lists = assignmentLists(data ?? [], now);
+  const { open, thisWeek, done, dismissed } = lists;
 
   const tabs: { value: Filter; label: string; count: number }[] = [
     { value: "open", label: "待完成", count: open.length },
@@ -418,14 +374,7 @@ export function DeadlinesPage() {
       ));
 
   // The open list is split by how soon each item is due.
-  const overdue = open.filter((item) => due(item) <= now);
-  const soon = open.filter(
-    (item) => due(item) > now && due(item) - now <= WEEK_MS,
-  );
-  const later = open.filter(
-    (item) => due(item) - now > WEEK_MS && item.dueAt !== null,
-  );
-  const undated = open.filter((item) => item.dueAt === null);
+  const { overdue, soon, later, undated } = lists;
   const groups: {
     icon: LucideIcon;
     title: string;

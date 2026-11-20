@@ -35,6 +35,9 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      - name: Type check the iPhone app
+        run: bun run --cwd apps/mobile typecheck
+
       - name: Run tests
         run: bun test
 

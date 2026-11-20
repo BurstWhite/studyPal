@@ -8,19 +8,19 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { CalendarEntry } from "../server/calendar/store";
-import type { Assignment } from "../server/routes/assignments";
-import type { Progress, StudyBlock } from "../server/routes/study";
+import type { CalendarEntry } from "@studypal/core/calendar/store";
+import type { Assignment } from "@studypal/core/routes/assignments";
+import type { Progress, StudyBlock } from "@studypal/core/routes/study";
 import { cn } from "../lib/utils";
-import { api, useQuery } from "./api";
+import { api, useQuery } from "@studypal/client/api";
 import {
   addDays,
   formatTime,
   startOfDay,
   weekdayLabel,
-} from "./calendar/dates";
-import { planPrompt, queuePrompt } from "./chat/pendingPrompt";
-import { describeRemaining, remainingTone } from "./DeadlinesPage";
+} from "@studypal/client/calendar/dates";
+import { planPrompt, queuePrompt } from "@studypal/client/chat/pendingPrompt";
+import { describeRemaining, remainingTone } from "@studypal/client/assignments";
 import { Chip, EmptyNote, PageHeader, Panel, Ring } from "./PageHeader";
 
 const HOUR_MS = 3_600_000;

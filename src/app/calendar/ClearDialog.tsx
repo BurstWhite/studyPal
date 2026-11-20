@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
-import type { ClearScope } from "../../server/calendar/store";
-import { api, useQuery } from "../api";
+import type { ClearScope } from "@studypal/core/calendar/store";
+import { api, useQuery } from "@studypal/client/api";
 
 const SCOPES: { scope: ClearScope; label: string; detail: string }[] = [
   {

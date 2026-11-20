@@ -1,16 +1,19 @@
 import { serve } from "bun";
 import index from "./index.html";
-import { handleAuth } from "./server/auth";
+import { getDb } from "@studypal/core/db";
+import { warmModelLists } from "@studypal/core/llm/models";
+import { assignmentRoutes } from "@studypal/core/routes/assignments";
+import { chatRoutes } from "@studypal/core/routes/chat";
+import { eventRoutes } from "@studypal/core/routes/events";
+import { studyRoutes } from "@studypal/core/routes/study";
+import { systemRoutes } from "@studypal/core/routes/system";
+import { syncNow, zjuRoutes } from "@studypal/core/routes/zju";
+import { guardAll, handleAuth } from "./server/auth";
 import { config } from "./server/config";
-import { getDb } from "./server/db";
-import { warmModelLists } from "./server/llm/models";
-import { assignmentRoutes } from "./server/routes/assignments";
-import { chatRoutes } from "./server/routes/chat";
-import { eventRoutes } from "./server/routes/events";
-import { studyRoutes } from "./server/routes/study";
-import { systemRoutes } from "./server/routes/system";
+import { useDesktopPlatform } from "./server/platform";
 import { usageRoutes } from "./server/routes/usage";
-import { syncNow, zjuRoutes } from "./server/routes/zju";
+
+useDesktopPlatform();
 
 // Open (and migrate) the database before accepting requests.
 getDb();
@@ -21,12 +24,12 @@ const server = serve({
 
   routes: {
     "/auth": { GET: (req) => handleAuth(req) },
-    ...systemRoutes,
-    ...eventRoutes,
-    ...assignmentRoutes,
-    ...zjuRoutes,
-    ...chatRoutes,
-    ...studyRoutes,
+    ...guardAll(systemRoutes),
+    ...guardAll(eventRoutes),
+    ...guardAll(assignmentRoutes),
+    ...guardAll(zjuRoutes),
+    ...guardAll(chatRoutes),
+    ...guardAll(studyRoutes),
     ...usageRoutes,
     "/api/*": () => Response.json({ error: "not found" }, { status: 404 }),
 

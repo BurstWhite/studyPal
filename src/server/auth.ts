@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import type { Routes } from "@studypal/core/router";
 import { config } from "./config";
 
 const COOKIE_NAME = "studypal_session";
@@ -63,11 +64,34 @@ export function handleAuth(req: Request, token = config.token): Response {
 type Handler<R extends Request> = (req: R) => Response | Promise<Response>;
 
 /** Wraps an API handler so it answers 401 unless the request is authorized. */
-export function guarded<R extends Request>(handler: Handler<R>): Handler<R> {
+export function guarded<R extends Request>(
+  handler: Handler<R>,
+  token = config.token,
+): Handler<R> {
   return (req) => {
-    if (!isAuthorized(req)) {
+    if (!isAuthorized(req, token)) {
       return Response.json({ error: "unauthorized" }, { status: 401 });
     }
     return handler(req);
   };
+}
+
+/** The liveness probe stays open; every other API route needs the session. */
+const UNGUARDED = new Set(["/api/health"]);
+
+/** Applies `guarded` to every handler of a shared route table. */
+export function guardAll<T extends Routes>(routes: T, token = config.token): T {
+  return Object.fromEntries(
+    Object.entries(routes).map(([path, methods]) => [
+      path,
+      UNGUARDED.has(path)
+        ? methods
+        : Object.fromEntries(
+            Object.entries(methods).map(([method, handler]) => [
+              method,
+              guarded(handler!, token),
+            ]),
+          ),
+    ]),
+  ) as T;
 }

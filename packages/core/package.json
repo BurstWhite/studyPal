@@ -1,0 +1,13 @@
+{
+  "name": "@studypal/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "studyPal's platform-neutral logic: database schema, calendar, ZJU sync, LLM chat, and the API route handlers.",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.7.0"
+  }
+}

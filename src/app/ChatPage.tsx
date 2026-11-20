@@ -14,14 +14,19 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import Markdown from "react-markdown";
-import type { ModelList } from "../server/llm/models";
-import type { ChatSummary, Provider, ProviderKind } from "../server/llm/store";
-import type { DisplayItem } from "../server/llm/turn";
-import { DECLINED_MESSAGE } from "../shared/chat";
+import type { ModelList } from "@studypal/core/llm/models";
+import type {
+  ChatSummary,
+  Provider,
+  ProviderKind,
+} from "@studypal/core/llm/store";
+import type { DisplayItem } from "@studypal/core/llm/turn";
+import { DECLINED_MESSAGE } from "@studypal/core/shared/chat";
 import { cn } from "../lib/utils";
-import { api, useQuery } from "./api";
+import { api, useQuery } from "@studypal/client/api";
 import {
   decide,
+  decideAll,
   forgetChat,
   onTurnFinished,
   sendMessage,
@@ -33,34 +38,21 @@ import {
   type ChatView,
   type LiveItem,
   type LiveTool,
-} from "./chat/liveChats";
-import { takePrompt } from "./chat/pendingPrompt";
-import { summarizeTool } from "./chat/toolSummary";
-
-export type { LiveItem } from "./chat/liveChats";
+} from "@studypal/client/chat/liveChats";
+import { groupPending } from "@studypal/client/chat/batches";
+import { takePrompt } from "@studypal/client/chat/pendingPrompt";
+import { summarizeTool } from "@studypal/client/chat/toolSummary";
+import {
+  choiceKey,
+  currentModel,
+  modelOptions,
+  sameWireFormat,
+  type ModelChoice,
+} from "@studypal/client/chat/models";
+import { isWaitingForReply } from "@studypal/client/chat/waiting";
 
 const markdownClass =
   "text-sm leading-relaxed [&_p]:my-2 first:[&_p]:mt-0 last:[&_p]:mb-0 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:mt-3 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:font-semibold [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:text-[0.85em] [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_a]:underline [&_table]:my-2 [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground";
-
-/**
- * Whether the assistant is working but has nothing on screen yet: right after
- * a message is sent, after tool results go back, or while it is thinking.
- */
-export function isWaitingForReply(
-  items: LiveItem[],
-  running: boolean,
-  thinking: boolean,
-): boolean {
-  if (!running) return false;
-  // A card waiting for the user's decision means the wait is on them.
-  if (items.some((item) => item.type === "tool" && item.awaiting)) return false;
-  if (thinking) return true;
-  const last = items.at(-1);
-  if (!last || last.type === "user") return true;
-  // A finished tool call: the results are with the model now. A tool still
-  // running shows its own spinner, and streaming text speaks for itself.
-  return last.type === "tool" && last.result !== undefined;
-}
 
 /** The assistant's mark, shown where one of its replies begins. */
 function AssistantMark() {
@@ -159,30 +151,62 @@ function ToolRow({
   );
 }
 
-/**
- * Whether a chat's stored history can be replayed to another provider: every
- * kind but Anthropic speaks the OpenAI chat-completions format.
- */
-const sameWireFormat = (a: ProviderKind | undefined, b: ProviderKind) =>
-  a !== undefined && (a === "anthropic") === (b === "anthropic");
-
-/** A provider and one of its models, as chosen in the picker. */
-export interface ModelChoice {
-  providerId: number;
-  model: string;
-}
-
-const choiceKey = (choice: ModelChoice) =>
-  `${choice.providerId}:${choice.model}`;
-
-/** The model a chat talks to: its own choice, else its provider's default. */
-function currentModel(
-  chat: ChatSummary,
-  providers: Provider[],
-): string | undefined {
+/** Several pending writes of one kind, folded so they are answered at once. */
+function BatchRow({
+  tools,
+  onDecision,
+}: {
+  tools: LiveTool[];
+  onDecision: (ids: string[], approve: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = summarizeTool(tools[0]!.name, tools[0]!.input).label;
+  const ids = tools.map((tool) => tool.id);
   return (
-    chat.model ??
-    providers.find((provider) => provider.id === chat.providerId)?.model
+    <div className="rounded-xl border border-primary/40 bg-secondary/60 px-3.5 py-2.5 text-sm">
+      <button
+        type="button"
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left"
+        onClick={() => setOpen(!open)}
+      >
+        <Wrench className="size-3.5 shrink-0 text-primary" />
+        <span className="font-medium">
+          {label}（{tools.length} 项）
+        </span>
+        <span className="flex-1" />
+        <span className="text-xs text-muted-foreground">等待你确认</span>
+        <ChevronDown
+          className={cn(
+            "size-3.5 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open && (
+        <ul className="mt-1 space-y-1 pl-5.5 text-xs text-muted-foreground">
+          {tools.map((tool) => (
+            <li key={tool.id}>
+              {summarizeTool(tool.name, tool.input).lines.join(" · ") || label}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3 flex gap-2 pl-5.5">
+        <Button size="sm" onClick={() => onDecision(ids, true)}>
+          <Check />
+          全部确认
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onDecision(ids, false)}
+        >
+          <X />
+          全部拒绝
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -200,19 +224,7 @@ function ModelPicker({
   disabled: boolean;
   onChange: (choice: ModelChoice) => void;
 }) {
-  const options = providers.map((provider) => {
-    const list = lists?.find((entry) => entry.providerId === provider.id);
-    // The configured model, and the one in use, are always offered even if
-    // the service does not list them (or the list could not be fetched).
-    const models = [...(list?.models ?? [])];
-    for (const extra of [
-      provider.model,
-      value?.providerId === provider.id ? value.model : undefined,
-    ]) {
-      if (extra && !models.includes(extra)) models.unshift(extra);
-    }
-    return { provider, models, error: list?.error };
-  });
+  const options = modelOptions(providers, lists, value);
 
   return (
     <div className="relative inline-flex shrink-0 items-center">
@@ -448,7 +460,24 @@ function Conversation({
               </p>
             </div>
           )}
-          {items.map((item, index) => {
+          {groupPending(items).map((entry) => {
+            if (entry.type === "batch") {
+              return (
+                <div key={entry.tools[0]!.id} className="relative pl-10">
+                  {items[entry.start - 1]?.type !== "assistant" &&
+                    items[entry.start - 1]?.type !== "tool" && (
+                      <AssistantMark />
+                    )}
+                  <BatchRow
+                    tools={entry.tools}
+                    onDecision={(ids, approve) =>
+                      decideAll(chatId, ids, approve)
+                    }
+                  />
+                </div>
+              );
+            }
+            const { item, index } = entry;
             // The assistant's mark sits beside the first part of each reply.
             const opensReply =
               item.type !== "user" &&

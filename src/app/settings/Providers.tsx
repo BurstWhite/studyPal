@@ -10,10 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Check, Loader2, Plug, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import type { TestResult } from "../../server/llm/models";
-import type { Provider, ProviderKind } from "../../server/llm/store";
+import type { TestResult } from "@studypal/core/llm/models";
+import type { Provider, ProviderKind } from "@studypal/core/llm/store";
 import { cn } from "../../lib/utils";
-import { api, useQuery } from "../api";
+import { api, useQuery } from "@studypal/client/api";
 
 const KIND_LABEL: Record<ProviderKind, string> = {
   anthropic: "Anthropic",
