@@ -29,7 +29,12 @@ export const systemRoutes = {
   /** Unauthenticated liveness probe used by the desktop shell at startup. */
   "/api/health": {
     GET: () =>
-      Response.json({ ok: true, app: "studypal", builtAt: platform().builtAt }),
+      Response.json({
+        ok: true,
+        app: "studypal",
+        builtAt: platform().builtAt,
+        version: platform().version,
+      }),
   },
   "/api/overview": {
     GET: () => Response.json(readOverview(getDb())),

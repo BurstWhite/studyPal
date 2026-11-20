@@ -44,6 +44,7 @@ fn spawn_server(app: &tauri::App, token: &str) -> Result<Child, BoxError> {
     .env("STUDYPAL_PORT", RELEASE_PORT.to_string())
     .env("STUDYPAL_TOKEN", token)
     .env("STUDYPAL_DATA_DIR", &data_dir)
+    .env("STUDYPAL_VERSION", app.package_info().version.to_string())
     .env("STUDYPAL_PARENT_PID", std::process::id().to_string())
     .spawn()
     .map_err(|error| format!("cannot start {}: {error}", binary.display()))?;

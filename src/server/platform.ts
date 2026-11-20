@@ -96,6 +96,7 @@ export const desktopPlatform: Platform = {
     if ((await child.exited) !== 0) throw new Error("open failed");
   },
   builtAt: config.builtAt,
+  version: config.version,
 };
 
 export function useDesktopPlatform(): void {

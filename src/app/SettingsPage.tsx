@@ -399,12 +399,14 @@ function SystemCalendar() {
 
 /** Which build is running, so an update can be confirmed at a glance. */
 function BuildInfo() {
-  const { data } = useQuery<{ builtAt: string }>("/api/health");
+  const { data } = useQuery<{ builtAt: string; version: string }>(
+    "/api/health",
+  );
   if (!data) return null;
   return (
     <p className="text-xs text-muted-foreground">
       {data.builtAt
-        ? `当前版本构建于 ${new Date(data.builtAt).toLocaleString("zh-CN", { hour12: false })}`
+        ? `studyPal ${data.version}，构建于 ${new Date(data.builtAt).toLocaleString("zh-CN", { hour12: false })}`
         : "开发模式"}
     </p>
   );

@@ -20,6 +20,8 @@ export const config = {
   isProduction,
   /** When this build was made; set by the build script, empty in development. */
   builtAt: process.env.STUDYPAL_BUILT_AT ?? "",
+  /** The release version; set by the desktop shell, empty in development. */
+  version: process.env.STUDYPAL_VERSION ?? "",
   port: Number(process.env.STUDYPAL_PORT ?? DEFAULT_PORT),
   /** Set by the desktop shell. When empty (plain `bun dev`), API auth is off. */
   token: process.env.STUDYPAL_TOKEN ?? "",

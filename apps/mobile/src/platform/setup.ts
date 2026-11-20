@@ -41,6 +41,7 @@ export function setUpPlatform(): void {
       await WebBrowser.openBrowserAsync(url);
     },
     builtAt: Constants.expoConfig?.version ?? "",
+    version: Constants.expoConfig?.version ?? "",
   });
 
   const route = createRouter({

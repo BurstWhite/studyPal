@@ -59,6 +59,8 @@ export interface Platform {
   openUrl(url: string): Promise<void>;
   /** When this build was made, shown in settings; empty in development. */
   builtAt: string;
+  /** The app's release version, e.g. "0.2.1"; empty in development. */
+  version: string;
 }
 
 let current: Platform | undefined;
