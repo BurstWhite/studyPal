@@ -44,4 +44,4 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: studyPal ${{ github.ref_name }}
           releaseDraft: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
