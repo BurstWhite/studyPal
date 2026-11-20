@@ -12,6 +12,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_updater::UpdaterExt;
 
 /// Must match the defaults in `src/server/config.ts`.
 const RELEASE_PORT: u16 = 47821;
@@ -99,6 +101,35 @@ fn show_main_window(app: &tauri::AppHandle) {
   }
 }
 
+/// Looks for a newer release and, if the user agrees, installs it and
+/// restarts. Runs in the background; any failure (offline, no release yet)
+/// is only logged, since the app works fine without updating.
+async fn check_for_update(app: tauri::AppHandle) -> Result<(), BoxError> {
+  let Some(update) = app.updater()?.check().await? else {
+    return Ok(());
+  };
+  let notes = update.body.clone().unwrap_or_default();
+  let message = format!(
+    "studyPal {} 已发布（当前 {}）。现在更新吗？\n\n{notes}",
+    update.version, update.current_version
+  );
+  let (answer, wait) = std::sync::mpsc::channel();
+  app
+    .dialog()
+    .message(message.trim_end())
+    .title("发现新版本")
+    .buttons(MessageDialogButtons::OkCancelCustom("更新并重启".into(), "稍后".into()))
+    .show(move |agreed| {
+      let _ = answer.send(agreed);
+    });
+  if !wait.recv().unwrap_or(false) {
+    return Ok(());
+  }
+  update.download_and_install(|_, _| {}, || {}).await?;
+  // The server child is stopped by the `Exit` event on the way out.
+  app.restart();
+}
+
 fn stop_server(app: &tauri::AppHandle) {
   let Some(server) = app.try_state::<Server>() else {
     return;
@@ -118,7 +149,21 @@ pub fn run() {
     .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
       show_main_window(app);
     }))
-    .setup(|app| start(app))
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
+    .setup(|app| {
+      start(app)?;
+      // Debug builds run from source; there is nothing to update.
+      if !cfg!(debug_assertions) {
+        let handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+          if let Err(error) = check_for_update(handle).await {
+            eprintln!("update check failed: {error}");
+          }
+        });
+      }
+      Ok(())
+    })
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
     .run(|app, event| match event {

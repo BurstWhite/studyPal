@@ -16,3 +16,6 @@ tauri-build = { version = "2.7.4", features = [] }
 tauri = { version = "2.12.5", features = [] }
 getrandom = "0.3"
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
+serde_json = "1"

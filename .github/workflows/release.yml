@@ -1,0 +1,47 @@
+name: Release
+
+# Push a tag such as v0.2.0 (matching `version` in src-tauri/tauri.conf.json)
+# to publish a release. The app checks the release's latest.json on startup.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish the macOS app
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Builds the app, signs the update with the repository secret, and
+      # uploads the bundle plus latest.json to the release for this tag.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STUDYPAL_DIST: "1"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tauriScript: bunx tauri
+          args: --bundles app,dmg --config src-tauri/tauri.dist.conf.json
+          tagName: ${{ github.ref_name }}
+          releaseName: studyPal ${{ github.ref_name }}
+          releaseDraft: false
+          uploadUpdaterJson: true
